@@ -1519,8 +1519,8 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
         if cur_w < w:
             wst.column_dimensions[col_l].width = w
 
-    # Por Unidade abaixo das métricas
-    pu_start = 3 + len(metricas) + 2
+    # Por Unidade: começa abaixo das métricas E abaixo do leaderboard (evita conflito de merge)
+    pu_start = max(3 + len(metricas) + 2, lb_r + 1)
     wst.row_dimensions[pu_start-1].height = 8
     wst.merge_cells(f"A{pu_start}:C{pu_start}"); cell_pu = wst[f"A{pu_start}"]
     cell_pu.value = "POR UNIDADE"

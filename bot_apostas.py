@@ -1190,10 +1190,13 @@ async def gerar_dashboard(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     except Exception as _e:
         import traceback as _tb
         _trace = _tb.format_exc()[-700:]
-        await update.message.reply_text(
-            f"❌ Erro ao gerar dashboard:\n`{str(_e)}`\n\n`{_trace}`",
-            parse_mode="Markdown", reply_markup=teclado_gerar()
-        )
+        try:
+            await update.message.reply_text(
+                f"❌ Erro ao gerar dashboard:\n{str(_e)}\n\n{_trace}",
+                reply_markup=teclado_gerar()
+            )
+        except Exception:
+            await update.message.reply_text("❌ Erro ao gerar dashboard. Verifique os logs.")
 
 async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     import openpyxl
@@ -1393,7 +1396,7 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
         stat_row(wst, 3+i, label, valor, fmt, cor_v)
 
     # ── LEADERBOARD (colunas D em diante) ──
-    LB_COL = 4
+    LB_COL = 5
     LB_HEADERS = ["#","Data","Hora","Descrição","Odd","Stake","Casa","Esporte","Lucro R$"]
     LB_WIDTHS  = [8, 12, 8, 32, 8, 10, 18, 14, 12]
     N_LB = len(LB_HEADERS)

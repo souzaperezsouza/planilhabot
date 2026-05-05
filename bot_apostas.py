@@ -1392,6 +1392,134 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
     for i,(label,valor,fmt,cor_v) in enumerate(metricas):
         stat_row(wst, 3+i, label, valor, fmt, cor_v)
 
+    # ── LEADERBOARD (colunas D em diante) ──
+    LB_COL = 4
+    LB_HEADERS = ["#","Data","Hora","Descrição","Odd","Stake","Casa","Esporte","Lucro R$"]
+    LB_WIDTHS  = [8, 12, 8, 32, 8, 10, 18, 14, 12]
+    N_LB = len(LB_HEADERS)
+
+    def lb_title(row, titulo, bg_color):
+        wst.merge_cells(start_row=row, start_column=LB_COL, end_row=row, end_column=LB_COL+N_LB-1)
+        cell = wst.cell(row=row, column=LB_COL, value=titulo)
+        est(cell, bold=True, bg=bg_color, size=11)
+        wst.row_dimensions[row].height = 22
+
+    def lb_headers_row(row):
+        for j, h in enumerate(LB_HEADERS):
+            cell = wst.cell(row=row, column=LB_COL+j, value=h)
+            est(cell, bold=True, bg="1E3A5F", size=9); cell.border = brd()
+        wst.row_dimensions[row].height = 18
+
+    def lb_data_row(row, aposta, idx):
+        l = lucro_aposta(aposta)
+        data_fmt = aposta["data"].strftime("%d/%m/%Y") if hasattr(aposta["data"],"strftime") else str(aposta["data"])[:10]
+        vals = [aposta["id"], data_fmt, aposta.get("horario",""), aposta["descricao"],
+                float(aposta["odd"]), float(aposta["stake"]),
+                aposta.get("casa",""), aposta.get("esporte",""), round(l,2)]
+        rb = WHITE if idx%2==0 else ALT
+        for j, val in enumerate(vals):
+            cell = wst.cell(row=row, column=LB_COL+j, value=val)
+            fc = cor(val) if j==8 else "000000"
+            cell.font = Font(name="Arial", size=9, color=fc)
+            cell.alignment = Alignment(horizontal="left" if j==3 else "center", vertical="center")
+            cell.fill = PatternFill("solid", start_color=rb); cell.border = brd()
+            if j in (4,5,8): cell.number_format = "#,##0.00"
+        wst.row_dimensions[row].height = 18
+
+    lb_r = 3
+
+    # Top 5 Greens
+    top5_greens = sorted(apostas_ganhas, key=lambda a: lucro_aposta(a), reverse=True)[:5]
+    lb_title(lb_r, "🏆 TOP 5 MAIORES GREENS", GREEN); lb_r += 1
+    lb_headers_row(lb_r); lb_r += 1
+    for i, a in enumerate(top5_greens):
+        lb_data_row(lb_r, a, i); lb_r += 1
+
+    lb_r += 1  # gap
+
+    # Top 5 Reds
+    top5_reds = sorted(apostas_perdidas, key=lambda a: lucro_aposta(a))[:5]
+    lb_title(lb_r, "💀 TOP 5 MAIORES REDS", RED); lb_r += 1
+    lb_headers_row(lb_r); lb_r += 1
+    for i, a in enumerate(top5_reds):
+        lb_data_row(lb_r, a, i); lb_r += 1
+
+    lb_r += 1  # gap
+
+    # Recordes: Melhor Dia / Semana / Mês
+    from collections import defaultdict as _dd_lb
+    import datetime as _dt_lb
+
+    por_dia_lb = _dd_lb(list)
+    for a in df_res:
+        por_dia_lb[str(a["data"])[:10]].append(a)
+    melhor_dia_k = max(por_dia_lb, key=lambda k: sum(lucro_aposta(x) for x in por_dia_lb[k])) if por_dia_lb else None
+    melhor_dia_lucro = round(sum(lucro_aposta(x) for x in por_dia_lb[melhor_dia_k]),2) if melhor_dia_k else 0
+    try: melhor_dia_fmt = _dt_lb.datetime.strptime(melhor_dia_k,"%Y-%m-%d").strftime("%d/%m/%Y")
+    except: melhor_dia_fmt = melhor_dia_k or "—"
+
+    def _dom_lb(dt):
+        if not isinstance(dt, _dt_lb.datetime):
+            dt = _dt_lb.datetime(dt.year, dt.month, dt.day) if isinstance(dt, _dt_lb.date) else _dt_lb.datetime.strptime(str(dt)[:10],"%Y-%m-%d")
+        return (dt - timedelta(days=(dt.weekday()+1)%7)).replace(hour=0,minute=0,second=0,microsecond=0)
+
+    por_sem_lb = _dd_lb(list)
+    for a in df_res:
+        por_sem_lb[_dom_lb(a["data"])].append(a)
+    melhor_sem_k = max(por_sem_lb, key=lambda k: sum(lucro_aposta(x) for x in por_sem_lb[k])) if por_sem_lb else None
+    melhor_sem_lucro = round(sum(lucro_aposta(x) for x in por_sem_lb[melhor_sem_k]),2) if melhor_sem_k else 0
+    if melhor_sem_k:
+        sab_lb = melhor_sem_k + timedelta(days=6)
+        melhor_sem_fmt = f"{melhor_sem_k.strftime('%d/%m')} - {sab_lb.strftime('%d/%m/%Y')}"
+    else:
+        melhor_sem_fmt = "—"
+
+    por_mes_lb = _dd_lb(list)
+    for a in df_res:
+        d_lb = a["data"] if hasattr(a["data"],"strftime") else _dt_lb.datetime.strptime(str(a["data"])[:10],"%Y-%m-%d")
+        por_mes_lb[d_lb.strftime("%Y-%m")].append(a)
+    melhor_mes_k = max(por_mes_lb, key=lambda k: sum(lucro_aposta(x) for x in por_mes_lb[k])) if por_mes_lb else None
+    melhor_mes_lucro = round(sum(lucro_aposta(x) for x in por_mes_lb[melhor_mes_k]),2) if melhor_mes_k else 0
+    _NOMES_M = ["","Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"]
+    if melhor_mes_k:
+        _ano_lb,_mes_lb = int(melhor_mes_k[:4]),int(melhor_mes_k[5:])
+        melhor_mes_fmt = f"{_NOMES_M[_mes_lb]}/{_ano_lb}"
+    else:
+        melhor_mes_fmt = "—"
+
+    wst.merge_cells(start_row=lb_r, start_column=LB_COL, end_row=lb_r, end_column=LB_COL+N_LB-1)
+    cell_rec = wst.cell(row=lb_r, column=LB_COL, value="📅 RECORDES DE LUCRO")
+    est(cell_rec, bold=True, bg=DARK, size=11); wst.row_dimensions[lb_r].height = 22; lb_r += 1
+
+    records = [
+        ("Melhor Dia",    melhor_dia_fmt, melhor_dia_lucro),
+        ("Melhor Semana", melhor_sem_fmt, melhor_sem_lucro),
+        ("Melhor Mês",    melhor_mes_fmt, melhor_mes_lucro),
+    ]
+    for i,(label_r, periodo_r, lucro_r) in enumerate(records):
+        rb = WHITE if i%2==0 else ALT
+        c1 = wst.cell(row=lb_r, column=LB_COL, value=label_r)
+        c1.font=Font(name="Arial",size=10,bold=True,color="1E3A5F")
+        c1.fill=PatternFill("solid",start_color=rb); c1.border=brd()
+        c1.alignment=Alignment(horizontal="left",vertical="center")
+        wst.merge_cells(start_row=lb_r,start_column=LB_COL+1,end_row=lb_r,end_column=LB_COL+6)
+        c2 = wst.cell(row=lb_r, column=LB_COL+1, value=periodo_r)
+        c2.font=Font(name="Arial",size=10,color="000000")
+        c2.fill=PatternFill("solid",start_color=rb); c2.border=brd()
+        c2.alignment=Alignment(horizontal="center",vertical="center")
+        wst.merge_cells(start_row=lb_r,start_column=LB_COL+7,end_row=lb_r,end_column=LB_COL+8)
+        c3 = wst.cell(row=lb_r, column=LB_COL+7, value=lucro_r)
+        c3.font=Font(name="Arial",size=10,bold=True,color=cor(lucro_r))
+        c3.fill=PatternFill("solid",start_color=rb); c3.border=brd()
+        c3.alignment=Alignment(horizontal="center",vertical="center")
+        c3.number_format="#,##0.00"
+        wst.row_dimensions[lb_r].height=20; lb_r+=1
+
+    for j,w in enumerate(LB_WIDTHS):
+        col_l = get_column_letter(LB_COL+j)
+        if wst.column_dimensions[col_l].width < w:
+            wst.column_dimensions[col_l].width = w
+
     # Por Unidade abaixo das métricas
     pu_start = 3 + len(metricas) + 2
     wst.row_dimensions[pu_start-1].height = 8

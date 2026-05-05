@@ -1517,7 +1517,8 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
 
     for j,w in enumerate(LB_WIDTHS):
         col_l = get_column_letter(LB_COL+j)
-        if wst.column_dimensions[col_l].width < w:
+        cur_w = wst.column_dimensions[col_l].width or 0
+        if cur_w < w:
             wst.column_dimensions[col_l].width = w
 
     # Por Unidade abaixo das métricas

@@ -1275,7 +1275,7 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
     ws.row_dimensions[6].height=10
 
     HDR=7; DAT=8
-    headers=["#","Data","Hora","Descricao","Odd","Stake","Esporte","Casa","Resultado","Lucro","Banca","Progressao"]
+    headers=["#","Data","Hora","Descricao","Odd","Stake","Esporte","Casa","Resultado","Lucro","Lucro U","Banca","Progressao"]
     ws.row_dimensions[HDR].height=22
     for c,h in enumerate(headers,1):
         cell=ws.cell(row=HDR,column=c,value=h); est(cell,bold=True,bg=DARK,size=10); cell.border=brd()
@@ -1285,37 +1285,41 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
         er=DAT+i; ws.row_dimensions[er].height=18
         rb=WHITE if i%2==0 else ALT
         res=a["resultado"]
-        lucro_a=banca_a=prog_a=""
+        lucro_a=lucro_u_a=banca_a=prog_a=""
         if res in ("ganhou","perdeu") or eh_cashout(a):
             lucro_a=lucro_aposta(a)
+            unid_a=float(a.get("unidade") or 50)
+            lucro_u_a=round(lucro_a/unid_a,2) if unid_a else ""
             acum2+=lucro_a; banca_a=round(acum2,2); prog_a=round(acum2/BANCA,4)
         res_d={"ganhou":"Green","perdeu":"Red","void":"Void","pendente":"Pendente"}.get(res,res)
         if eh_cashout(a): res_d="Cashout"
         data_fmt=a["data"].strftime("%d/%m/%Y") if hasattr(a["data"],"strftime") else str(a["data"])[:10]
         vals=[a["id"],data_fmt,a.get("horario",""),a["descricao"],a["odd"],a["stake"],
-              a.get("esporte",""),a.get("casa",""),res_d,lucro_a,banca_a,prog_a]
+              a.get("esporte",""),a.get("casa",""),res_d,lucro_a,lucro_u_a,banca_a,prog_a]
         for c,val in enumerate(vals,1):
             cell=ws.cell(row=er,column=c,value=val)
             fc="000000"
-            if c in (10,11) and val!="": fc=cor(val)
-            if c==12 and val!="": fc=cor(val)
+            if c in (10,11,12) and val!="": fc=cor(val)
+            if c==13 and val!="": fc=cor(val)
             cell.font=Font(name="Arial",size=10,color=fc)
             cell.alignment=Alignment(horizontal="left" if c==4 else "center",vertical="center")
             cell.fill=PatternFill("solid",start_color=rb); cell.border=brd()
-            if c in (5,6,10,11) and val!="": cell.number_format="#,##0.00"
-            if c==12 and val!="": cell.number_format="+0.00%;-0.00%;0.00%"
+            if c in (5,6,10,12) and val!="": cell.number_format="#,##0.00"
+            if c==11 and val!="": cell.number_format="+0.00;-0.00;0.00"
+            if c==13 and val!="": cell.number_format="+0.00%;-0.00%;0.00%"
 
     tr=DAT+len(apostas_ord); ws.row_dimensions[tr].height=20
-    for c in range(1,13):
+    for c in range(1,14):
         cell=ws.cell(row=tr,column=c)
         if c==4: cell.value="TOTAL"
         elif c==6: cell.value=f"=SUM(F{DAT}:F{tr-1})"; cell.number_format="#,##0.00"
         elif c==10: cell.value=f"=SUM(J{DAT}:J{tr-1})"; cell.number_format="#,##0.00"
+        elif c==11: cell.value=f"=SUM(K{DAT}:K{tr-1})"; cell.number_format="+0.00;-0.00;0.00"
         est(cell,bold=True,bg=DARK,size=10); cell.border=brd()
 
-    widths=[8,12,11,32,14,12,14,14,13,12,13,12]
+    widths=[8,12,11,32,14,12,14,14,13,12,10,13,12]
     for i,w in enumerate(widths,1): ws.column_dimensions[get_column_letter(i)].width=w
-    ws.merge_cells("A1:L1"); ws["A1"] = "DASHBOARD DE APOSTAS"
+    ws.merge_cells("A1:M1"); ws["A1"] = "DASHBOARD DE APOSTAS"
     est(ws["A1"], bold=True, bg=DARK, size=16); ws.row_dimensions[1].height=40
 
     # ── ABA 2: ESTATÍSTICAS ──
@@ -1397,8 +1401,8 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
 
     # ── LEADERBOARD (colunas D em diante) ──
     LB_COL = 5
-    LB_HEADERS = ["#","Data","Hora","Descrição","Odd","Stake","Casa","Esporte","Lucro R$"]
-    LB_WIDTHS  = [8, 12, 8, 32, 8, 10, 18, 14, 12]
+    LB_HEADERS = ["#","Data","Hora","Descrição","Odd","Stake","Casa","Esporte","Lucro R$","Lucro U"]
+    LB_WIDTHS  = [8, 12, 8, 45, 8, 10, 18, 14, 12, 10]
     N_LB = len(LB_HEADERS)
 
     def lb_title(row, titulo, bg_color):
@@ -1415,19 +1419,22 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
 
     def lb_data_row(row, aposta, idx):
         l = lucro_aposta(aposta)
+        unid = float(aposta.get("unidade") or 50)
+        lucro_u = round(l / unid, 2) if unid else 0
         data_fmt = aposta["data"].strftime("%d/%m/%Y") if hasattr(aposta["data"],"strftime") else str(aposta["data"])[:10]
         vals = [aposta["id"], data_fmt, aposta.get("horario",""), aposta["descricao"],
                 float(aposta["odd"]), float(aposta["stake"]),
-                aposta.get("casa",""), aposta.get("esporte",""), round(l,2)]
+                aposta.get("casa",""), aposta.get("esporte",""), round(l,2), lucro_u]
         rb = WHITE if idx%2==0 else ALT
         for j, val in enumerate(vals):
             cell = wst.cell(row=row, column=LB_COL+j, value=val)
-            fc = cor(val) if j==8 else "000000"
+            fc = cor(val) if j in (8,9) else "000000"
             cell.font = Font(name="Arial", size=9, color=fc)
-            cell.alignment = Alignment(horizontal="left" if j==3 else "center", vertical="center")
+            al = "left" if j==3 else "center"
+            cell.alignment = Alignment(horizontal=al, vertical="center", wrap_text=(j==3))
             cell.fill = PatternFill("solid", start_color=rb); cell.border = brd()
-            if j in (4,5,8): cell.number_format = "#,##0.00"
-        wst.row_dimensions[row].height = 18
+            if j in (4,5,8,9): cell.number_format = "#,##0.00"
+        wst.row_dimensions[row].height = 30 if len(str(aposta["descricao"])) > 40 else 18
 
     lb_r = 3
 
@@ -1519,8 +1526,8 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
         if cur_w < w:
             wst.column_dimensions[col_l].width = w
 
-    # Por Unidade: começa abaixo das métricas E abaixo do leaderboard (evita conflito de merge)
-    pu_start = max(3 + len(metricas) + 2, lb_r + 1)
+    # Por Unidade abaixo das métricas
+    pu_start = 3 + len(metricas) + 2
     wst.row_dimensions[pu_start-1].height = 8
     wst.merge_cells(f"A{pu_start}:C{pu_start}"); cell_pu = wst[f"A{pu_start}"]
     cell_pu.value = "POR UNIDADE"

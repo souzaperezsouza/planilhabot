@@ -1501,21 +1501,16 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
     ]
     for i,(label_r, periodo_r, lucro_r) in enumerate(records):
         rb = WHITE if i%2==0 else ALT
-        c1 = wst.cell(row=lb_r, column=LB_COL, value=label_r)
-        c1.font=Font(name="Arial",size=10,bold=True,color="1E3A5F")
-        c1.fill=PatternFill("solid",start_color=rb); c1.border=brd()
-        c1.alignment=Alignment(horizontal="left",vertical="center")
-        wst.merge_cells(start_row=lb_r,start_column=LB_COL+1,end_row=lb_r,end_column=LB_COL+6)
-        c2 = wst.cell(row=lb_r, column=LB_COL+1, value=periodo_r)
-        c2.font=Font(name="Arial",size=10,color="000000")
-        c2.fill=PatternFill("solid",start_color=rb); c2.border=brd()
-        c2.alignment=Alignment(horizontal="center",vertical="center")
-        wst.merge_cells(start_row=lb_r,start_column=LB_COL+7,end_row=lb_r,end_column=LB_COL+8)
-        c3 = wst.cell(row=lb_r, column=LB_COL+7, value=lucro_r)
-        c3.font=Font(name="Arial",size=10,bold=True,color=cor(lucro_r))
-        c3.fill=PatternFill("solid",start_color=rb); c3.border=brd()
-        c3.alignment=Alignment(horizontal="center",vertical="center")
-        c3.number_format="#,##0.00"
+        for j, val in enumerate([label_r, periodo_r, round(lucro_r, 2)]):
+            cell = wst.cell(row=lb_r, column=LB_COL+j, value=val)
+            fc = cor(lucro_r) if j==2 else ("1E3A5F" if j==0 else "000000")
+            cell.font = Font(name="Arial", size=10, bold=(j!=1), color=fc)
+            cell.fill = PatternFill("solid", start_color=rb); cell.border = brd()
+            cell.alignment = Alignment(horizontal="left" if j<2 else "center", vertical="center")
+            if j==2: cell.number_format = "#,##0.00"
+        for j in range(3, N_LB):
+            cell = wst.cell(row=lb_r, column=LB_COL+j)
+            cell.fill = PatternFill("solid", start_color=rb); cell.border = brd()
         wst.row_dimensions[lb_r].height=20; lb_r+=1
 
     for j,w in enumerate(LB_WIDTHS):

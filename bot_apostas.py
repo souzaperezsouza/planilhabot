@@ -1317,7 +1317,7 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
         elif c==11: cell.value=f"=SUM(K{DAT}:K{tr-1})"; cell.number_format="+0.00;-0.00;0.00"
         est(cell,bold=True,bg=DARK,size=10); cell.border=brd()
 
-    widths=[8,12,11,32,14,12,14,14,13,12,10,13,12]
+    widths=[8,12,11,55,14,12,14,20,13,12,10,13,12]
     for i,w in enumerate(widths,1): ws.column_dimensions[get_column_letter(i)].width=w
     ws.merge_cells("A1:M1"); ws["A1"] = "DASHBOARD DE APOSTAS"
     est(ws["A1"], bold=True, bg=DARK, size=16); ws.row_dimensions[1].height=40
@@ -1402,7 +1402,7 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
     # ── LEADERBOARD (colunas D em diante) ──
     LB_COL = 5
     LB_HEADERS = ["#","Data","Hora","Descrição","Odd","Stake","Casa","Esporte","Lucro R$","Lucro U"]
-    LB_WIDTHS  = [8, 12, 8, 45, 8, 10, 18, 14, 12, 10]
+    LB_WIDTHS  = [8, 12, 8, 70, 8, 10, 20, 14, 12, 10]
     N_LB = len(LB_HEADERS)
 
     def lb_title(row, titulo, bg_color):
@@ -1430,11 +1430,10 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
             cell = wst.cell(row=row, column=LB_COL+j, value=val)
             fc = cor(val) if j in (8,9) else "000000"
             cell.font = Font(name="Arial", size=9, color=fc)
-            al = "left" if j==3 else "center"
-            cell.alignment = Alignment(horizontal=al, vertical="center", wrap_text=(j==3))
+            cell.alignment = Alignment(horizontal="left" if j==3 else "center", vertical="center", wrap_text=False)
             cell.fill = PatternFill("solid", start_color=rb); cell.border = brd()
             if j in (4,5,8,9): cell.number_format = "#,##0.00"
-        wst.row_dimensions[row].height = 30 if len(str(aposta["descricao"])) > 40 else 18
+        wst.row_dimensions[row].height = 18
 
     lb_r = 3
 

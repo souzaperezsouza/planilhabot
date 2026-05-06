@@ -14,7 +14,7 @@ from telegram.ext import (
 )
 
 TOKEN         = "8790751046:AAG-AsvU3V-K5j4U8IOUQrpT6NXX8K3FcjU"
-DATABASE_URL  = os.environ.get("DATABASE_URL", "postgresql://apostas_db_br3e_user:9Q8kF2084mtEmOESc09jc22ZR7nS5FLz@dpg-d6ub6lfafjfc7380et2g-a/apostas_db_br3e")
+DATABASE_URL  = os.environ.get("DATABASE_URL", "postgresql://db_maio_user:5r0VoKg7gMyftnInLfilB0pLWWg4RpKB@dpg-d7trrf7lk1mc739vcchg-a/db_maio")
 BANCA_INICIAL = 5000
 
 CASAS = ["Bet365","Betano","SportingBet/Betboo","Novibet","Vaidebet/Betpix365","Betfast","BETesporte",

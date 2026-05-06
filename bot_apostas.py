@@ -1330,7 +1330,7 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
     apostas_ganhas   = [a for a in df_res if a["resultado"] == "ganhou"]
     apostas_perdidas = [a for a in df_res if a["resultado"] == "perdeu"]
     capital_em_jogo  = sum(float(a["stake"]) for a in apostas if a["resultado"] == "pendente")
-    capital_atual    = BANCA + lucro_total
+    capital_atual    = BANCA + lucro_total - capital_em_jogo
     maior_odd_acert  = max((float(a["odd"]) for a in apostas_ganhas), default=0)
     maior_stake_val  = max((float(a["stake"]) for a in df_res), default=0)
     stake_total_e    = sum(float(a["stake"]) for a in df_res)

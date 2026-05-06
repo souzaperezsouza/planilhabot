@@ -1330,7 +1330,7 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
     apostas_ganhas   = [a for a in df_res if a["resultado"] == "ganhou"]
     apostas_perdidas = [a for a in df_res if a["resultado"] == "perdeu"]
     capital_em_jogo  = sum(float(a["stake"]) for a in apostas if a["resultado"] == "pendente")
-    capital_atual    = BANCA + lucro_total - capital_em_jogo
+    capital_atual    = BANCA + lucro_total
     maior_odd_acert  = max((float(a["odd"]) for a in apostas_ganhas), default=0)
     maior_stake_val  = max((float(a["stake"]) for a in df_res), default=0)
     stake_total_e    = sum(float(a["stake"]) for a in df_res)
@@ -1553,10 +1553,13 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
             if col in (8,9): cell.number_format="+0.0%;-0.0%;0.0%"
         wst.row_dimensions[er].height=18
 
-    # Larguras
+    # Larguras — só aplica se menor que o valor já definido (LB pode ter setado maior)
     wst.column_dimensions["A"].width = 32
     wst.column_dimensions["B"].width = 16
-    for i in range(3,10): wst.column_dimensions[get_column_letter(i)].width = 12
+    for i in range(3,10):
+        col_l = get_column_letter(i)
+        if (wst.column_dimensions[col_l].width or 0) < 12:
+            wst.column_dimensions[col_l].width = 12
 
     # ── Gráficos por faixa de odds (0.5 em 0.5, sem faixas vazias) ──
     odd_max = max((float(a["odd"]) for a in df_res), default=3.5)

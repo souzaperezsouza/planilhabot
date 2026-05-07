@@ -17,9 +17,37 @@ TOKEN         = "8790751046:AAG-AsvU3V-K5j4U8IOUQrpT6NXX8K3FcjU"
 DATABASE_URL  = os.environ.get("DATABASE_URL", "postgresql://db_maio_user:5r0VoKg7gMyftnInLfilB0pLWWg4RpKB@dpg-d7trrf7lk1mc739vcchg-a/db_maio")
 BANCA_INICIAL = 5000
 
-CASAS = ["Bet365","Betano","SportingBet/Betboo","Novibet","Vaidebet/Betpix365","Betfast","BETesporte",
-         "Betnacional","BetFair","Stake","Lottu","Esportes Da Sorte","Esportivabet",
-         "Outra"]
+CASAS = [
+    "Bet365","Betano","SportingBet/Betboo","Vaidebet/Betpix365","Lottu",
+    "BETesporte","BetFair","Novibet","Esportivabet","Betnacional",
+    "Vupi","Goldebet/Lotogreen","Pagol","Versus","Kto",
+    "4Win","Donaldbet/Bet.bet","Vivasorte","Esportes Da Sorte","Stake",
+    "Faz1Bet","Outra"
+]
+
+def get_casas_ordenadas(n=13):
+    """Retorna as n casas mais usadas no banco + 'Outra' no final."""
+    try:
+        with conectar() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT casa, COUNT(*) as total
+                    FROM apostas
+                    WHERE casa IS NOT NULL AND casa != ''
+                    GROUP BY casa
+                    ORDER BY total DESC
+                    LIMIT %s
+                """, (n,))
+                rows = cur.fetchall()
+        top = [r[0] for r in rows if r[0] and r[0] != "Outra"][:n]
+        # Garante que casas conhecidas mas não no banco apareçam se necessário
+        if len(top) < n:
+            for c in CASAS:
+                if c not in top and c != "Outra" and len(top) < n:
+                    top.append(c)
+        return top + ["Outra"]
+    except Exception:
+        return CASAS
 
 # Mapeamento para normalizar casas antigas/variantes para o nome atual
 MAPA_CASAS_GEMEAS = {
@@ -459,7 +487,7 @@ async def receber_esporte(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return ESPORTE
     else:
         ctx.user_data["esporte"] = raw
-    teclado_casa = [[c] for c in CASAS] + [[CANCELAR_BTN]]
+    teclado_casa = [[c] for c in get_casas_ordenadas()] + [[CANCELAR_BTN]]
     await update.message.reply_text("🏦 *Casa de aposta:*",
         reply_markup=ReplyKeyboardMarkup(teclado_casa, resize_keyboard=True, one_time_keyboard=True),
         parse_mode="Markdown")
@@ -473,7 +501,8 @@ async def receber_casa(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ctx.user_data["aguardando_casa_custom"] = True
         return CASA
     ctx.user_data.pop("aguardando_casa_custom", False)
-    ctx.user_data["casa"] = casa.strip().title() if casa not in CASAS else casa
+    casas_validas = get_casas_ordenadas()
+    ctx.user_data["casa"] = casa.strip().title() if casa not in casas_validas else casa
 
     new_id = inserir({
         "data": ctx.user_data["data"], "horario": ctx.user_data.get("horario",""),
@@ -867,7 +896,7 @@ async def editar_receber_campo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return EDITAR_CAMPO
     ctx.user_data["editar_campo"] = campo
     if campo == "casa":
-        teclado = [[c] for c in CASAS] + [[CANCELAR_BTN]]
+        teclado = [[c] for c in get_casas_ordenadas()] + [[CANCELAR_BTN]]
         await update.message.reply_text("🏦 *Nova casa:*",
             reply_markup=ReplyKeyboardMarkup(teclado, resize_keyboard=True, one_time_keyboard=True),
             parse_mode="Markdown")
@@ -996,7 +1025,7 @@ async def editar_receber_casa(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def aplicar_edicao(update, ctx, id_alvo, campo, novo_valor):
     campo_real = campo.replace("_custom","")
-    if campo_real == "casa" and isinstance(novo_valor, str) and novo_valor not in CASAS:
+    if campo_real == "casa" and isinstance(novo_valor, str) and novo_valor not in get_casas_ordenadas():
         novo_valor = novo_valor.strip().title()
     atualizar_campo(id_alvo, campo_real, novo_valor)
     label = CAMPOS_LABEL.get(campo_real, campo_real)
@@ -1076,103 +1105,114 @@ async def gerar_resposta(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     return GERAR_MENU
 
 async def gerar_xlsx_dados(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Gera o migrar_db.py pronto para uso no próximo mês."""
+    """Gera migrar_db.py com todos os dados embutidos — funciona mesmo se o banco antigo sumir."""
     await update.message.reply_text("⏳ Gerando script de migração, aguarde...")
     try:
-        apostas = carregar()
+        apostas       = carregar()
         unidade_atual = get_unidade_atual()
-        max_id = max((a["id"] for a in apostas), default=0)
-        total = len(apostas)
+        max_id        = max((a["id"] for a in apostas), default=0)
+        total         = len(apostas)
         from datetime import datetime as dt2
+
+        # Serializa cada aposta como tupla Python embutida no script
+        linhas = []
+        for a in apostas:
+            data_str = a["data"].strftime("%Y-%m-%d") if hasattr(a["data"], "strftime") else str(a["data"])[:10]
+            horario  = a.get("horario") or ""
+            desc     = str(a["descricao"]).replace("'", "\\'")
+            casa     = str(a.get("casa") or "").replace("'", "\\'")
+            esporte  = str(a.get("esporte") or "").replace("'", "\\'")
+            resultado = a.get("resultado") or "pendente"
+            freebet  = float(a.get("freebet") or 0)
+            unidade  = float(a.get("unidade") or 50)
+            cashout  = float(a.get("cashout_valor") or 0)
+            odd      = float(a["odd"])
+            stake    = float(a["stake"])
+            linhas.append(
+                f"    ({a['id']}, '{data_str}', '{horario}', '{desc}', "
+                f"{odd}, {stake}, '{resultado}', '{casa}', '{esporte}', "
+                f"{freebet}, {unidade}, {cashout}),"
+            )
+
+        dados_str = "\n".join(linhas)
 
         script = f'''"""
 Migração de banco de dados — Bot Apostas
-Gerado em {dt2.now().strftime("%d/%m/%Y %H:%M")} | {total} apostas | unidade atual: R$ {unidade_atual:.0f}
+Gerado em {dt2.now().strftime("%d/%m/%Y %H:%M")} | {total} apostas | unidade: R$ {unidade_atual:.0f}
+
+⚠️  Os dados já estão embutidos neste script.
+    O banco antigo NÃO precisa estar online para rodar.
 
 Como usar:
-  1. Troque NEW_URL pela Internal URL do banco novo (Render → banco novo → Connections → Internal Database URL)
-  2. Render → suspenda o banco atual → ative o banco novo
-  3. No CMD:
+  1. Troque NEW_URL pela Internal URL do banco novo
+     (Render → banco novo → Connections → Internal Database URL)
+  2. No CMD:
        cd C:\\\\Users\\\\enzop\\\\Downloads
        python migrar_db.py
-  4. Render → seu serviço → Environment → DATABASE_URL
-     Troque pela Internal URL do banco novo → Save Changes → Manual Deploy
+  3. Render → seu serviço → Environment → DATABASE_URL
+     Troque pela Internal URL do novo banco → Save Changes → Manual Deploy
 """
 import psycopg2
-import psycopg2.extras
 
-OLD_URL = "{DATABASE_URL}"
 NEW_URL = "COLE_AQUI_A_INTERNAL_URL_DO_BANCO_NOVO"  # <-- troque isso
+
+APOSTAS = [
+# (id, data, horario, descricao, odd, stake, resultado, casa, esporte, freebet, unidade, cashout_valor)
+{dados_str}
+]
+
+UNIDADE_ATUAL = "{unidade_atual:.0f}"
+MAX_ID        = {max_id}
 
 if __name__ == "__main__":
     if NEW_URL == "COLE_AQUI_A_INTERNAL_URL_DO_BANCO_NOVO":
         print("❌ Troque NEW_URL pela Internal URL do novo banco antes de rodar.")
         exit(1)
 
-    print("Conectando ao banco atual...")
-    conn_old = psycopg2.connect(OLD_URL)
-    cur_old  = conn_old.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur_old.execute("SELECT * FROM apostas ORDER BY id ASC")
-    apostas  = [dict(r) for r in cur_old.fetchall()]
-    cur_old.execute("SELECT * FROM configuracoes")
-    configs  = [dict(r) for r in cur_old.fetchall()]
-    cur_old.execute("SELECT valor FROM configuracoes WHERE chave=\'unidade_atual\'")
-    row_u    = cur_old.fetchone()
-    unidade  = row_u["valor"] if row_u else "{unidade_atual:.0f}"
-    conn_old.close()
-    print(f"  {{len(apostas)}} apostas lidas | unidade atual: R$ {{unidade}}")
+    conn = psycopg2.connect(NEW_URL)
+    cur  = conn.cursor()
 
-    print("Conectando ao banco novo...")
-    conn_new = psycopg2.connect(NEW_URL)
-    cur_new  = conn_new.cursor()
-    cur_new.execute("""CREATE TABLE IF NOT EXISTS apostas (
+    cur.execute("""CREATE TABLE IF NOT EXISTS apostas (
         id SERIAL PRIMARY KEY, data DATE NOT NULL, horario VARCHAR(5),
         descricao TEXT NOT NULL, odd NUMERIC(8,3) NOT NULL, stake NUMERIC(10,2) NOT NULL,
         resultado VARCHAR(10) DEFAULT \'pendente\', casa VARCHAR(50), esporte VARCHAR(50),
         freebet NUMERIC(10,2) DEFAULT 0, unidade NUMERIC(10,2) DEFAULT 50,
         cashout_valor NUMERIC(10,2) DEFAULT 0)""")
-    cur_new.execute("""CREATE TABLE IF NOT EXISTS configuracoes (
+    cur.execute("""CREATE TABLE IF NOT EXISTS configuracoes (
         chave VARCHAR(50) PRIMARY KEY, valor TEXT NOT NULL)""")
-    cur_new.execute("DELETE FROM apostas")
-    cur_new.execute("DELETE FROM configuracoes")
+    cur.execute("DELETE FROM apostas")
+    cur.execute("DELETE FROM configuracoes")
 
-    for a in apostas:
-        cur_new.execute("""INSERT INTO apostas
+    print(f"Inserindo {{len(APOSTAS)}} apostas...")
+    for a in APOSTAS:
+        cur.execute("""INSERT INTO apostas
             (id,data,horario,descricao,odd,stake,resultado,casa,esporte,freebet,unidade,cashout_valor)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-            (a["id"],a["data"],a.get("horario"),a["descricao"],a["odd"],a["stake"],
-             a["resultado"],a.get("casa"),a.get("esporte"),
-             float(a.get("freebet") or 0), float(a.get("unidade") or 50),
-             float(a.get("cashout_valor") or 0)))
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""", a)
 
-    for c in configs:
-        cur_new.execute("""INSERT INTO configuracoes (chave,valor) VALUES (%s,%s)
-            ON CONFLICT (chave) DO UPDATE SET valor=EXCLUDED.valor""",
-            (c["chave"], c["valor"]))
-    cur_new.execute("""INSERT INTO configuracoes (chave,valor) VALUES (\'unidade_atual\',%s)
-        ON CONFLICT (chave) DO UPDATE SET valor=EXCLUDED.valor""", (unidade,))
+    cur.execute("""INSERT INTO configuracoes (chave,valor) VALUES (\'unidade_atual\',%s)
+        ON CONFLICT (chave) DO UPDATE SET valor=EXCLUDED.valor""", (UNIDADE_ATUAL,))
+    cur.execute("SELECT setval(\'apostas_id_seq\', %s)", (MAX_ID,))
 
-    if apostas:
-        cur_new.execute("SELECT setval(\'apostas_id_seq\', %s)", (max(a["id"] for a in apostas),))
-
-    conn_new.commit(); conn_new.close()
-    print(f"\\n✅ {{len(apostas)}} apostas migradas | unidade: R$ {{unidade}}")
-    print("\\nAgora faça o Manual Deploy no Render com a nova DATABASE_URL.")
+    conn.commit(); conn.close()
+    cashouts = sum(1 for a in APOSTAS if a[6] == "void" and float(a[11]) > 0)
+    print(f"✅ {{len(APOSTAS)}} apostas migradas | {{cashouts}} cashouts | unidade: R$ {{UNIDADE_ATUAL}}")
+    print("Agora faça o Manual Deploy no Render com a nova DATABASE_URL.")
 '''
 
         script_bytes = script.encode("utf-8")
         instrucoes = (
             "📂 *Script de migração gerado!*\n\n"
             f"_{total} apostas | unidade atual: R$ {unidade_atual:.0f}_\n\n"
-            "*Como usar no próximo mês:*\n\n"
+            "⚠️ *Os dados já estão embutidos no script.*\n"
+            "Funciona mesmo se o banco antigo sumir.\n\n"
+            "*Como usar:*\n\n"
             "1️⃣ Salve o `migrar\\_db.py` na pasta Downloads\n"
-            "2️⃣ Abra o arquivo e troque `NEW\\_URL` pela *Internal URL* do banco novo\n"
-            "3️⃣ Render → suspenda o banco atual → ative o banco novo\n"
-            "4️⃣ No CMD:\n"
+            "2️⃣ Abra e troque `NEW\\_URL` pela *Internal URL* do banco novo\n"
+            "3️⃣ No CMD:\n"
             "   `cd C:\\\\Users\\\\enzop\\\\Downloads`\n"
             "   `python migrar\\_db.py`\n"
-            "5️⃣ Render → seu serviço → Environment → `DATABASE\\_URL`\n"
-            "   Troque pela *Internal URL* do banco novo → *Manual Deploy*"
+            "4️⃣ Render → seu serviço → Environment → `DATABASE\\_URL`\n"
+            "   Troque pela *Internal URL* → *Manual Deploy*"
         )
         await update.message.reply_document(
             document=InputFile(io.BytesIO(script_bytes), filename="migrar_db.py"),
@@ -1181,6 +1221,8 @@ if __name__ == "__main__":
         )
     except Exception as e:
         await update.message.reply_text(f"❌ Erro:\n`{str(e)}`", parse_mode="Markdown")
+
+
 
 # ── GERAR DASHBOARD ───────────────────────────────────────────────────────────
 async def gerar_dashboard(update: Update, ctx: ContextTypes.DEFAULT_TYPE):

@@ -71,11 +71,37 @@ MAPA_CASAS_GEMEAS = {
     "Betpontobet":    "Donaldbet/Bet.bet",
     "Betponto":       "Donaldbet/Bet.bet",
     "Donald":         "Donaldbet/Bet.bet"
+    #esportiva
+    "esportiva"       "EsportivaBet"
+    "Esportiva"       "EsportivaBet"
+    "esportivabet"    "EsportivaBet"
+    "Esportivabet"    "EsportivaBet"
 }
 
 ESPORTES = ["⚽ Futebol","🏀 Basquete","🎾 Tênis","🏒 Hóquei",
             "🏈 Futebol Americano","⚾ Beisebol","🥊 MMA/Boxe","🏐 Vôlei",
-            "🏎️ F1","🎮 Esports","Outro"]
+            "🏎️ F1","🎮 Esports","🏏 Cricket","Outro"]
+
+def get_esportes_ordenados():
+    """Retorna esportes ordenados por uso no banco + 'Outro' no final."""
+    try:
+        with conectar() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT esporte, COUNT(*) as total
+                    FROM apostas
+                    WHERE esporte IS NOT NULL AND esporte != ''
+                    GROUP BY esporte
+                    ORDER BY total DESC
+                """)
+                rows = cur.fetchall()
+        top = [r[0] for r in rows if r[0] and r[0] != "Outro"]
+        for e in ESPORTES:
+            if e not in top and e != "Outro":
+                top.append(e)
+        return top + ["Outro"]
+    except Exception:
+        return ESPORTES
 
 logging.basicConfig(level=logging.WARNING)
 
@@ -467,7 +493,7 @@ async def receber_stake(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if raw == CANCELAR_BTN: return await cancelar(update, ctx)
     try:
         ctx.user_data["stake"] = float(raw.replace(",", "."))
-        teclado_esp = [[e] for e in ESPORTES] + [[CANCELAR_BTN]]
+        teclado_esp = [[e] for e in get_esportes_ordenados()] + [[CANCELAR_BTN]]
         await update.message.reply_text("🏅 *Esporte:*",
             reply_markup=ReplyKeyboardMarkup(teclado_esp, resize_keyboard=True, one_time_keyboard=True),
             parse_mode="Markdown")
@@ -902,7 +928,7 @@ async def editar_receber_campo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown")
         return EDITAR_CASA
     if campo == "esporte":
-        teclado = [[e] for e in ESPORTES] + [[CANCELAR_BTN]]
+        teclado = [[e] for e in get_esportes_ordenados()] + [[CANCELAR_BTN]]
         await update.message.reply_text("🏅 *Novo esporte:*",
             reply_markup=ReplyKeyboardMarkup(teclado, resize_keyboard=True, one_time_keyboard=True),
             parse_mode="Markdown")

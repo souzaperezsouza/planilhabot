@@ -77,6 +77,27 @@ ESPORTES = ["⚽ Futebol","🏀 Basquete","🎾 Tênis","🏒 Hóquei",
             "🏈 Futebol Americano","⚾ Beisebol","🥊 MMA/Boxe","🏐 Vôlei",
             "🏎️ F1","🎮 Esports","Outro"]
 
+def get_esportes_ordenados():
+    """Retorna esportes ordenados por uso no banco + 'Outro' no final."""
+    try:
+        with conectar() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT esporte, COUNT(*) as total
+                    FROM apostas
+                    WHERE esporte IS NOT NULL AND esporte != ''
+                    GROUP BY esporte
+                    ORDER BY total DESC
+                """)
+                rows = cur.fetchall()
+        top = [r[0] for r in rows if r[0] and r[0] != "Outro"]
+        for e in ESPORTES:
+            if e not in top and e != "Outro":
+                top.append(e)
+        return top + ["Outro"]
+    except Exception:
+        return ESPORTES
+
 logging.basicConfig(level=logging.WARNING)
 
 # Estados dos ConversationHandlers
@@ -150,6 +171,7 @@ def inicializar_db():
         conn.commit()
     # Normaliza casas com nomes antigos/errados automaticamente a cada deploy
     migrar_casas_gemeas()
+    migrar_esportes()
 
 def carregar():
     with conectar() as conn:
@@ -205,6 +227,20 @@ def migrar_casas_gemeas():
             atualizadas = 0
             for nome_antigo, nome_novo in MAPA_CASAS_GEMEAS.items():
                 cur.execute("UPDATE apostas SET casa=%s WHERE LOWER(casa)=LOWER(%s)", (nome_novo, nome_antigo))
+                atualizadas += cur.rowcount
+        conn.commit()
+    return atualizadas
+
+def migrar_esportes():
+    """Normaliza esportes sem emoji para o nome com emoji usando MAPA_ESPORTE."""
+    with conectar() as conn:
+        with conn.cursor() as cur:
+            atualizadas = 0
+            for nome_antigo, nome_novo in MAPA_ESPORTE.items():
+                cur.execute(
+                    "UPDATE apostas SET esporte=%s WHERE LOWER(esporte)=LOWER(%s) AND esporte != %s",
+                    (nome_novo, nome_antigo, nome_novo)
+                )
                 atualizadas += cur.rowcount
         conn.commit()
     return atualizadas
@@ -467,7 +503,7 @@ async def receber_stake(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if raw == CANCELAR_BTN: return await cancelar(update, ctx)
     try:
         ctx.user_data["stake"] = float(raw.replace(",", "."))
-        teclado_esp = [[e] for e in ESPORTES] + [[CANCELAR_BTN]]
+        teclado_esp = [[e] for e in get_esportes_ordenados()] + [[CANCELAR_BTN]]
         await update.message.reply_text("🏅 *Esporte:*",
             reply_markup=ReplyKeyboardMarkup(teclado_esp, resize_keyboard=True, one_time_keyboard=True),
             parse_mode="Markdown")
@@ -902,7 +938,7 @@ async def editar_receber_campo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown")
         return EDITAR_CASA
     if campo == "esporte":
-        teclado = [[e] for e in ESPORTES] + [[CANCELAR_BTN]]
+        teclado = [[e] for e in get_esportes_ordenados()] + [[CANCELAR_BTN]]
         await update.message.reply_text("🏅 *Novo esporte:*",
             reply_markup=ReplyKeyboardMarkup(teclado, resize_keyboard=True, one_time_keyboard=True),
             parse_mode="Markdown")
@@ -1538,14 +1574,39 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
     else:
         melhor_mes_fmt = "—"
 
+    # Piores
+    pior_dia_k = min(por_dia_lb, key=lambda k: sum(lucro_aposta(x) for x in por_dia_lb[k])) if por_dia_lb else None
+    pior_dia_lucro = round(sum(lucro_aposta(x) for x in por_dia_lb[pior_dia_k]),2) if pior_dia_k else 0
+    try: pior_dia_fmt = _dt_lb.datetime.strptime(pior_dia_k,"%Y-%m-%d").strftime("%d/%m/%Y")
+    except: pior_dia_fmt = pior_dia_k or "—"
+
+    pior_sem_k = min(por_sem_lb, key=lambda k: sum(lucro_aposta(x) for x in por_sem_lb[k])) if por_sem_lb else None
+    pior_sem_lucro = round(sum(lucro_aposta(x) for x in por_sem_lb[pior_sem_k]),2) if pior_sem_k else 0
+    if pior_sem_k:
+        sab_pior = pior_sem_k + timedelta(days=6)
+        pior_sem_fmt = f"{pior_sem_k.strftime('%d/%m')} - {sab_pior.strftime('%d/%m/%Y')}"
+    else:
+        pior_sem_fmt = "—"
+
+    pior_mes_k = min(por_mes_lb, key=lambda k: sum(lucro_aposta(x) for x in por_mes_lb[k])) if por_mes_lb else None
+    pior_mes_lucro = round(sum(lucro_aposta(x) for x in por_mes_lb[pior_mes_k]),2) if pior_mes_k else 0
+    if pior_mes_k:
+        _ano_pm,_mes_pm = int(pior_mes_k[:4]),int(pior_mes_k[5:])
+        pior_mes_fmt = f"{_NOMES_M[_mes_pm]}/{_ano_pm}"
+    else:
+        pior_mes_fmt = "—"
+
     wst.merge_cells(start_row=lb_r, start_column=LB_COL, end_row=lb_r, end_column=LB_COL+N_LB-1)
     cell_rec = wst.cell(row=lb_r, column=LB_COL, value="📅 RECORDES DE LUCRO")
     est(cell_rec, bold=True, bg=DARK, size=11); wst.row_dimensions[lb_r].height = 22; lb_r += 1
 
     records = [
         ("Melhor Dia",    melhor_dia_fmt, melhor_dia_lucro),
+        ("Pior Dia",      pior_dia_fmt,   pior_dia_lucro),
         ("Melhor Semana", melhor_sem_fmt, melhor_sem_lucro),
+        ("Pior Semana",   pior_sem_fmt,   pior_sem_lucro),
         ("Melhor Mês",    melhor_mes_fmt, melhor_mes_lucro),
+        ("Pior Mês",      pior_mes_fmt,   pior_mes_lucro),
     ]
     for i,(label_r, periodo_r, lucro_r) in enumerate(records):
         rb = WHITE if i%2==0 else ALT

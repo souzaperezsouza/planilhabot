@@ -13,12 +13,12 @@ from telegram.ext import (
     ConversationHandler, ContextTypes, filters
 )
 
-TOKEN         = "8790751046:AAFHpd7q4FmgUZrq3PA4eMb06fMyMaiL5lE"
+TOKEN         = os.environ.get("TOKEN", "")
 DATABASE_URL  = os.environ.get("DATABASE_URL", "postgresql://db_maio_user:5r0VoKg7gMyftnInLfilB0pLWWg4RpKB@dpg-d7trrf7lk1mc739vcchg-a/db_maio")
 BANCA_INICIAL = 5000
 
 CASAS = [
-    "Bet365","Betano","SportingBet/Betboo","Vaidebet","Betpix365","Lottu",
+    "Bet365","Betano","SportingBet","Betboo","Vaidebet","Betpix365","Lottu",
     "BETesporte","BetFair","Novibet","Esportivabet","Betnacional",
     "Vupi","Goldebet/Lotogreen","Pagol","Versus","Kto",
     "4Win","Donaldbet/Bet.bet","Vivasorte","Esportes Da Sorte","Stake",
@@ -51,11 +51,7 @@ def get_casas_ordenadas(n=13):
 
 # Mapeamento para normalizar casas antigas/variantes para o nome atual
 MAPA_CASAS_GEMEAS = {
-    "sportingbet":    "SportingBet/Betboo",
-    "Sportingbet":    "SportingBet/Betboo",
-    "SportingBet":    "SportingBet/Betboo",
-    "betboo":         "SportingBet/Betboo",
-    "Betboo":         "SportingBet/Betboo",
+
 
     # Donaldbet/Bet.bet
     "donaldbet":      "Donaldbet/Bet.bet",

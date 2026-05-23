@@ -13,7 +13,7 @@ from telegram.ext import (
     ConversationHandler, ContextTypes, filters
 )
 
-TOKEN         = os.environ.get("TOKEN", "")
+TOKEN         = "8790751046:AAFHpd7q4FmgUZrq3PA4eMb06fMyMaiL5lE"
 DATABASE_URL  = os.environ.get("DATABASE_URL", "postgresql://db_maio_user:5r0VoKg7gMyftnInLfilB0pLWWg4RpKB@dpg-d7trrf7lk1mc739vcchg-a/db_maio")
 BANCA_INICIAL = 5000
 

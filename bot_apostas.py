@@ -53,6 +53,13 @@ def get_casas_ordenadas(n=13):
 MAPA_CASAS_GEMEAS = {
 
 
+    # Vaidebet
+    "vdb":            "Vaidebet",
+    "Vdb":            "Vaidebet",
+    "VDB":            "Vaidebet",
+    # Rei do Pitaco
+    "pitaco":         "Rei do Pitaco",
+    "Pitaco":         "Rei do Pitaco",
     # Donaldbet/Bet.bet
     "donaldbet":      "Donaldbet/Bet.bet",
     "Donaldbet":      "Donaldbet/Bet.bet",
@@ -80,6 +87,7 @@ RESULTADOS_MENU                                     = 14
 GERAR_MENU                                          = 15
 
 CANCELAR_BTN = "❌ Cancelar"
+VOLTAR_BTN   = "⬅️ Voltar"
 
 # ── TECLADOS ──────────────────────────────────────────────────────────────────
 def teclado_menu():
@@ -91,6 +99,9 @@ def teclado_menu():
 
 def teclado_cancelar():
     return ReplyKeyboardMarkup([[CANCELAR_BTN]], resize_keyboard=True)
+
+def teclado_cancelar_voltar():
+    return ReplyKeyboardMarkup([[VOLTAR_BTN, CANCELAR_BTN]], resize_keyboard=True)
 
 def teclado_resultados():
     return ReplyKeyboardMarkup([
@@ -345,6 +356,7 @@ async def nova_aposta_inicio(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def receber_data(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     raw = update.message.text.strip()
     if raw == CANCELAR_BTN: return await cancelar(update, ctx)
+    if raw == VOLTAR_BTN: return await nova_aposta_inicio(update, ctx)
     if raw == "0":
         ctx.user_data["data"] = datetime.now().strftime("%Y-%m-%d")
     else:
@@ -356,7 +368,7 @@ async def receber_data(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     agora = datetime.now().strftime("%H:%M")
     await update.message.reply_text(
         f"⏰ *Horário do jogo*\nAgora são *{agora}* — mande *0* para usar ou digite outro (HH:MM):",
-        reply_markup=teclado_cancelar(), parse_mode="Markdown"
+        reply_markup=teclado_cancelar_voltar(), parse_mode="Markdown"
     )
     return HORARIO
 
@@ -393,6 +405,13 @@ def normalizar_data(raw: str):
 async def receber_horario(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     raw = update.message.text.strip()
     if raw == CANCELAR_BTN: return await cancelar(update, ctx)
+    if raw == VOLTAR_BTN:
+        hoje = datetime.now().strftime("%d/%m/%Y")
+        await update.message.reply_text(
+            f"📅 *Data do jogo*\nHoje é *{hoje}* — mande *0* para confirmar ou digite outra:",
+            reply_markup=teclado_cancelar(), parse_mode="Markdown"
+        )
+        return DATA
     if raw == "0":
         ctx.user_data["horario"] = datetime.now().strftime("%H:%M")
     else:
@@ -401,7 +420,7 @@ async def receber_horario(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Horário inválido:")
             return HORARIO
         ctx.user_data["horario"] = horario
-    await update.message.reply_text("🏷 *Descrição:*", reply_markup=teclado_cancelar(), parse_mode="Markdown")
+    await update.message.reply_text("🏷 *Descrição:*", reply_markup=teclado_cancelar_voltar(), parse_mode="Markdown")
     return DESCRICAO
 
 def normalizar_horario(raw: str):
@@ -438,17 +457,28 @@ def normalizar_horario(raw: str):
     return None
 
 async def receber_descricao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if update.message.text.strip() == CANCELAR_BTN: return await cancelar(update, ctx)
-    ctx.user_data["descricao"] = update.message.text.strip()
-    await update.message.reply_text("🔢 *Odd:*", reply_markup=teclado_cancelar(), parse_mode="Markdown")
+    raw = update.message.text.strip()
+    if raw == CANCELAR_BTN: return await cancelar(update, ctx)
+    if raw == VOLTAR_BTN:
+        agora = datetime.now().strftime("%H:%M")
+        await update.message.reply_text(
+            f"⏰ *Horário do jogo*\nAgora são *{agora}* — mande *0* para usar ou digite outro (HH:MM):",
+            reply_markup=teclado_cancelar_voltar(), parse_mode="Markdown"
+        )
+        return HORARIO
+    ctx.user_data["descricao"] = raw
+    await update.message.reply_text("🔢 *Odd:*", reply_markup=teclado_cancelar_voltar(), parse_mode="Markdown")
     return ODD
 
 async def receber_odd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     raw = update.message.text.strip()
     if raw == CANCELAR_BTN: return await cancelar(update, ctx)
+    if raw == VOLTAR_BTN:
+        await update.message.reply_text("🏷 *Descrição:*", reply_markup=teclado_cancelar_voltar(), parse_mode="Markdown")
+        return DESCRICAO
     try:
         ctx.user_data["odd"] = float(raw.replace(",", "."))
-        await update.message.reply_text("💰 *Stake (R$):*", reply_markup=teclado_cancelar(), parse_mode="Markdown")
+        await update.message.reply_text("💰 *Stake (R$):*", reply_markup=teclado_cancelar_voltar(), parse_mode="Markdown")
         return STAKE
     except ValueError:
         await update.message.reply_text("❌ Odd inválida:")
@@ -471,6 +501,9 @@ async def receber_stake(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def receber_esporte(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     raw = update.message.text.strip()
     if raw == CANCELAR_BTN: return await cancelar(update, ctx)
+    if raw == VOLTAR_BTN:
+        await update.message.reply_text("💰 *Stake (R$):*", reply_markup=teclado_cancelar_voltar(), parse_mode="Markdown")
+        return STAKE
     if ctx.user_data.pop("aguardando_esporte_custom", False):
         ctx.user_data["esporte"] = raw
     elif raw == "Outro":
@@ -479,7 +512,7 @@ async def receber_esporte(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return ESPORTE
     else:
         ctx.user_data["esporte"] = raw
-    teclado_casa = [[c] for c in get_casas_ordenadas()] + [[CANCELAR_BTN]]
+    teclado_casa = [[c] for c in get_casas_ordenadas()] + [[VOLTAR_BTN, CANCELAR_BTN]]
     await update.message.reply_text("🏦 *Casa de aposta:*",
         reply_markup=ReplyKeyboardMarkup(teclado_casa, resize_keyboard=True, one_time_keyboard=True),
         parse_mode="Markdown")
@@ -488,6 +521,12 @@ async def receber_esporte(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def receber_casa(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     casa = update.message.text.strip()
     if casa == CANCELAR_BTN: return await cancelar(update, ctx)
+    if casa == VOLTAR_BTN:
+        teclado_esp = [[e] for e in get_esportes_ordenados()] + [[VOLTAR_BTN, CANCELAR_BTN]]
+        await update.message.reply_text("🏅 *Esporte:*",
+            reply_markup=ReplyKeyboardMarkup(teclado_esp, resize_keyboard=True, one_time_keyboard=True),
+            parse_mode="Markdown")
+        return ESPORTE
     if casa == "Outra":
         await update.message.reply_text("Digite o nome da casa:", reply_markup=teclado_cancelar())
         ctx.user_data["aguardando_casa_custom"] = True

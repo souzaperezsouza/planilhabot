@@ -61,15 +61,47 @@ MAPA_CASAS_GEMEAS = {
     "pitaco":         "Rei do Pitaco",
     "Pitaco":         "Rei do Pitaco",
     # Donaldbet/Bet.bet
-    "donaldbet":      "Donaldbet/Bet.bet",
-    "Donaldbet":      "Donaldbet/Bet.bet",
-    "DonaldBet":      "Donaldbet/Bet.bet",
-    "bet.bet":        "Donaldbet/Bet.bet",
-    "Bet.bet":        "Donaldbet/Bet.bet",
-    "BET.BET":        "Donaldbet/Bet.bet",
-    "Betpontobet":    "Donaldbet/Bet.bet",
-    "Betponto":       "Donaldbet/Bet.bet",
-    "Donald":         "Donaldbet/Bet.bet"
+    "donaldbet":                                      "Donaldbet/Bet.bet",
+    "Donaldbet":                                      "Donaldbet/Bet.bet",
+    "DonaldBet":                                      "Donaldbet/Bet.bet",
+    "bet.bet":                                        "Donaldbet/Bet.bet",
+    "Bet.bet":                                        "Donaldbet/Bet.bet",
+    "BET.BET":                                        "Donaldbet/Bet.bet",
+    "Betpontobet":                                    "Donaldbet/Bet.bet",
+    "Betponto":                                       "Donaldbet/Bet.bet",
+    "Donald":                                         "Donaldbet/Bet.bet",
+    # variacao com maiuscula no Bet.Bet (como aparece no banco)
+    "Donaldbet/Bet.Bet":                              "Donaldbet/Bet.bet",
+    # link markdown que o Telegram salva como texto
+    "Donaldbet/[Bet.bet](https://bet.bet/)":          "Donaldbet/Bet.bet",
+    "Donaldbet/[Bet.Bet](https://bet.bet/)":          "Donaldbet/Bet.bet",
+
+    # Bateubet (typos e variacoes com espaco)
+    "Bateu Bet":       "Bateubet",
+    "Bateu":           "Bateubet",
+    "Bqteubet":        "Bateubet",
+    "Bqtaubet":        "Bateubet",
+
+    # Vaidebet (variacao com espaco)
+    "Vai De Bet":      "Vaidebet",
+
+    # Mc Games (variacao com espaco)
+    "Mc Games":        "Mcgames",
+    "MC Games":        "Mcgames",
+    "McGames":         "Mcgames",
+
+    # Bolsa De Apostas (singular)
+    "Bolsa De Aposta": "Bolsa De Apostas",
+
+    # Rei Do Pitaco (canonical e maiusculo)
+    "Rei do Pitaco":   "Rei Do Pitaco",
+    "rei do pitaco":   "Rei Do Pitaco",
+
+    # Betpix365 (abreviacao)
+    "betpix":          "Betpix365",
+    "Betpix":          "Betpix365",
+    "BetPix":          "Betpix365",
+    "BETPIX":          "Betpix365",
 }
 
 ESPORTES = ["⚽ Futebol","🏀 Basquete","🎾 Tênis","🏒 Hóquei",

@@ -108,6 +108,27 @@ ESPORTES = ["⚽ Futebol","🏀 Basquete","🎾 Tênis","🏒 Hóquei",
             "🏈 Futebol Americano","⚾ Beisebol","🥊 MMA/Boxe","🏐 Vôlei",
             "🏎️ F1","🎮 Esports","Outro"]
 
+def get_esportes_ordenados():
+    """Retorna esportes ordenados por uso no banco + 'Outro' no final."""
+    try:
+        with conectar() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT esporte, COUNT(*) as total
+                    FROM apostas
+                    WHERE esporte IS NOT NULL AND esporte != ''
+                    GROUP BY esporte
+                    ORDER BY total DESC
+                """)
+                rows = cur.fetchall()
+        top = [r[0] for r in rows if r[0] and r[0] != "Outro"]
+        for e in ESPORTES:
+            if e not in top and e != "Outro":
+                top.append(e)
+        return top + ["Outro"]
+    except Exception:
+        return ESPORTES
+
 logging.basicConfig(level=logging.WARNING)
 
 # Estados dos ConversationHandlers

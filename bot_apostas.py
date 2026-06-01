@@ -519,9 +519,12 @@ async def receber_odd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def receber_stake(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     raw = update.message.text.strip()
     if raw == CANCELAR_BTN: return await cancelar(update, ctx)
+    if raw == VOLTAR_BTN:
+        await update.message.reply_text("🔢 *Odd:*", reply_markup=teclado_cancelar_voltar(), parse_mode="Markdown")
+        return ODD
     try:
         ctx.user_data["stake"] = float(raw.replace(",", "."))
-        teclado_esp = [[e] for e in ESPORTES] + [[CANCELAR_BTN]]
+        teclado_esp = [[e] for e in get_esportes_ordenados()] + [[VOLTAR_BTN, CANCELAR_BTN]]
         await update.message.reply_text("🏅 *Esporte:*",
             reply_markup=ReplyKeyboardMarkup(teclado_esp, resize_keyboard=True, one_time_keyboard=True),
             parse_mode="Markdown")

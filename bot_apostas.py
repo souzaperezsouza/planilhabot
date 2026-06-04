@@ -14,7 +14,7 @@ from telegram.ext import (
 )
 
 TOKEN         = "8790751046:AAFHpd7q4FmgUZrq3PA4eMb06fMyMaiL5lE"
-DATABASE_URL  = os.environ.get("DATABASE_URL", "postgresql://db_maio_user:5r0VoKg7gMyftnInLfilB0pLWWg4RpKB@dpg-d7trrf7lk1mc739vcchg-a/db_maio")
+DATABASE_URL  = os.environ.get("DATABASE_URL", "postgresql://db_junho_user:57idJbDlxsIdRiM2mxvTP9YcIGHQ2MAV@dpg-d8gtb2n7f7vs739lt170-a.oregon-postgres.render.com/db_junho")
 BANCA_INICIAL = 5000
 
 CASAS = [
@@ -1206,7 +1206,7 @@ async def gerar_xlsx_dados(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         for a in apostas:
             data_str = a["data"].strftime("%Y-%m-%d") if hasattr(a["data"], "strftime") else str(a["data"])[:10]
             horario  = a.get("horario") or ""
-            desc     = str(a["descricao"]).replace("'", "\\'")
+            desc     = str(a["descricao"]).replace("\n", " ").replace("\r", " ").replace("'", "\\'")
             casa     = str(a.get("casa") or "").replace("'", "\\'")
             esporte  = str(a.get("esporte") or "").replace("'", "\\'")
             resultado = a.get("resultado") or "pendente"
@@ -1231,17 +1231,17 @@ Gerado em {dt2.now().strftime("%d/%m/%Y %H:%M")} | {total} apostas | unidade: R$
     O banco antigo NÃO precisa estar online para rodar.
 
 Como usar:
-  1. Troque NEW_URL pela Internal URL do banco novo
-     (Render → banco novo → Connections → Internal Database URL)
+  1. Troque NEW_URL pela External URL do banco novo
+     (Render → banco novo → Connections → External Database URL)
   2. No CMD:
        cd C:\\\\Users\\\\enzop\\\\Downloads
        python migrar_db.py
   3. Render → seu serviço → Environment → DATABASE_URL
-     Troque pela Internal URL do novo banco → Save Changes → Manual Deploy
+     Coloque a Internal URL do novo banco no Environment → Save Changes → Manual Deploy
 """
 import psycopg2
 
-NEW_URL = "COLE_AQUI_A_INTERNAL_URL_DO_BANCO_NOVO"  # <-- troque isso
+NEW_URL = "COLE_AQUI_A_EXTERNAL_URL_DO_BANCO_NOVO"  # <-- troque isso
 
 APOSTAS = [
 # (id, data, horario, descricao, odd, stake, resultado, casa, esporte, freebet, unidade, cashout_valor)
@@ -1252,8 +1252,8 @@ UNIDADE_ATUAL = "{unidade_atual:.0f}"
 MAX_ID        = {max_id}
 
 if __name__ == "__main__":
-    if NEW_URL == "COLE_AQUI_A_INTERNAL_URL_DO_BANCO_NOVO":
-        print("❌ Troque NEW_URL pela Internal URL do novo banco antes de rodar.")
+    if NEW_URL == "COLE_AQUI_A_EXTERNAL_URL_DO_BANCO_NOVO":
+        print("❌ Troque NEW_URL pela External URL do novo banco antes de rodar.")
         exit(1)
 
     conn = psycopg2.connect(NEW_URL)
@@ -1294,12 +1294,12 @@ if __name__ == "__main__":
             "Funciona mesmo se o banco antigo sumir.\n\n"
             "*Como usar:*\n\n"
             "1️⃣ Salve o `migrar\\_db.py` na pasta Downloads\n"
-            "2️⃣ Abra e troque `NEW\\_URL` pela *Internal URL* do banco novo\n"
+            "2️⃣ Abra e troque `NEW\\_URL` pela *External URL* do banco novo\n"
             "3️⃣ No CMD:\n"
             "   `cd C:\\\\Users\\\\enzop\\\\Downloads`\n"
             "   `python migrar\\_db.py`\n"
             "4️⃣ Render → seu serviço → Environment → `DATABASE\\_URL`\n"
-            "   Troque pela *Internal URL* → *Manual Deploy*"
+            "   Coloque a *Internal URL* → *Manual Deploy*"
         )
         await update.message.reply_document(
             document=InputFile(io.BytesIO(script_bytes), filename="migrar_db.py"),

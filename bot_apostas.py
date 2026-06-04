@@ -181,7 +181,7 @@ def inicializar_db():
                     data      DATE NOT NULL,
                     horario   VARCHAR(5),
                     descricao TEXT NOT NULL,
-                    odd       NUMERIC(8,3) NOT NULL,
+                    odd       NUMERIC(12,6) NOT NULL,
                     stake     NUMERIC(10,2) NOT NULL,
                     resultado VARCHAR(10) DEFAULT 'pendente',
                     casa      VARCHAR(50),
@@ -191,6 +191,7 @@ def inicializar_db():
                 )
             """)
             cur.execute("ALTER TABLE apostas ADD COLUMN IF NOT EXISTS freebet NUMERIC(10,2) DEFAULT 0")
+            cur.execute("ALTER TABLE apostas ALTER COLUMN odd TYPE NUMERIC(12,6)")
             cur.execute("ALTER TABLE apostas ADD COLUMN IF NOT EXISTS unidade NUMERIC(10,2) DEFAULT 50")
             cur.execute("ALTER TABLE apostas ADD COLUMN IF NOT EXISTS cashout_valor NUMERIC(10,2) DEFAULT 0")
             cur.execute("""
@@ -1217,8 +1218,8 @@ async def gerar_xlsx_dados(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             stake    = float(a["stake"])
             linhas.append(
                 f"    ({a['id']}, '{data_str}', '{horario}', '{desc}', "
-                f"{odd}, {stake}, '{resultado}', '{casa}', '{esporte}', "
-                f"{freebet}, {unidade}, {cashout}),"
+                f"{repr(odd)}, {repr(stake)}, '{resultado}', '{casa}', '{esporte}', "
+                f"{repr(freebet)}, {repr(unidade)}, {repr(cashout)}),"
             )
 
         dados_str = "\n".join(linhas)
@@ -1261,7 +1262,7 @@ if __name__ == "__main__":
 
     cur.execute("""CREATE TABLE IF NOT EXISTS apostas (
         id SERIAL PRIMARY KEY, data DATE NOT NULL, horario VARCHAR(5),
-        descricao TEXT NOT NULL, odd NUMERIC(8,3) NOT NULL, stake NUMERIC(10,2) NOT NULL,
+        descricao TEXT NOT NULL, odd NUMERIC(12,6) NOT NULL, stake NUMERIC(10,2) NOT NULL,
         resultado VARCHAR(10) DEFAULT \'pendente\', casa VARCHAR(50), esporte VARCHAR(50),
         freebet NUMERIC(10,2) DEFAULT 0, unidade NUMERIC(10,2) DEFAULT 50,
         cashout_valor NUMERIC(10,2) DEFAULT 0)""")

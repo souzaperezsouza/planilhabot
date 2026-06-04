@@ -603,7 +603,7 @@ async def receber_casa(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"✅ *Aposta #{new_id} salva!*\n\n"
         f"📅 {data_fmt}{hora_txt}\n🏅 {ctx.user_data.get('esporte','')}\n"
-        f"🏷 {ctx.user_data['descricao']}\n🔢 Odd: {ctx.user_data['odd']}\n"
+        f"🏷 {ctx.user_data['descricao']}\n🔢 Odd: {float(ctx.user_data['odd']):g}\n"
         f"💰 Stake: R$ {float(ctx.user_data['stake']):.2f}\n🏦 Casa: {ctx.user_data['casa']}",
         parse_mode="Markdown"
     )
@@ -967,7 +967,7 @@ async def editar_receber_id(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     hora = f" {aposta.get('horario','')}" if aposta.get("horario") else ""
     _label_res = {"ganhou":"Green ✅","perdeu":"Red ❌","void":"Void ↩️","pendente":"Pendente ⏳"}
     info = (f"✏️ *Aposta #{id_alvo}*\n\n📅 {data_fmt}{hora}\n🏷 {aposta['descricao']}\n"
-            f"🔢 Odd: {aposta['odd']}\n💰 Stake: R$ {float(aposta['stake']):.2f}\n"
+            f"🔢 Odd: {float(aposta['odd']):g}\n💰 Stake: R$ {float(aposta['stake']):.2f}\n"
             f"🏦 Casa: {aposta.get('casa','')}\n📊 Resultado: {_label_res.get(aposta['resultado'], aposta['resultado'])}\n🎁 Freebet: R$ {float(aposta['freebet'] or 0):.2f}\n\n*Qual campo editar?*")
     teclado = [[CAMPOS_LABEL[c]] for c in CAMPOS_EDITAVEIS] + [[CANCELAR_BTN]]
     await update.message.reply_text(info,

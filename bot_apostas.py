@@ -60,6 +60,8 @@ MAPA_CASAS_GEMEAS = {
     # Rei do Pitaco
     "pitaco":         "Rei do Pitaco",
     "Pitaco":         "Rei do Pitaco",
+    "Rei Do Pitaco":  "Rei do Pitaco",
+    "rei do pitaco":  "Rei do Pitaco",
     # Donaldbet/Bet.bet
     "donaldbet":                                      "Donaldbet/Bet.bet",
     "Donaldbet":                                      "Donaldbet/Bet.bet",
@@ -106,7 +108,7 @@ MAPA_CASAS_GEMEAS = {
 
 ESPORTES = ["⚽ Futebol","🏀 Basquete","🎾 Tênis","🏒 Hóquei",
             "🏈 Futebol Americano","⚾ Beisebol","🥊 MMA/Boxe","🏐 Vôlei",
-            "🏎️ F1","🎮 Esports","Outro"]
+            "🏎️ F1","🎮 Esports","🎯 Múltipla","Outro"]
 
 def get_esportes_ordenados():
     """Retorna esportes ordenados por uso no banco + 'Outro' no final."""
@@ -263,6 +265,16 @@ def migrar_casas_gemeas():
             for nome_antigo, nome_novo in MAPA_CASAS_GEMEAS.items():
                 cur.execute("UPDATE apostas SET casa=%s WHERE LOWER(casa)=LOWER(%s)", (nome_novo, nome_antigo))
                 atualizadas += cur.rowcount
+            # Normaliza variantes de múltipla
+            cur.execute(
+                "UPDATE apostas SET esporte='🎯 Múltipla' WHERE LOWER(esporte) LIKE '%ltipla%' AND esporte != '🎯 Múltipla'"
+            )
+            atualizadas += cur.rowcount
+            # Rei Do Pitaco → Rei do Pitaco
+            cur.execute(
+                "UPDATE apostas SET casa='Rei do Pitaco' WHERE LOWER(casa)='rei do pitaco' AND casa != 'Rei do Pitaco'"
+            )
+            atualizadas += cur.rowcount
         conn.commit()
     return atualizadas
 
@@ -349,7 +361,11 @@ MAPA_ESPORTE = {
 
 def normalizar_esporte(s):
     if not s: return ""
-    return MAPA_ESPORTE.get(s.strip().lower(), s.strip())
+    s = s.strip()
+    sl = s.lower()
+    if "ltipla" in sl and ("esporte" in sl or "sport" in sl or sl in ("multipla","múltipla")):
+        return "🎯 Múltipla"
+    return MAPA_ESPORTE.get(sl, s)
 
 def lucro_aposta(a):
     stake   = float(a["stake"])
@@ -562,13 +578,13 @@ async def receber_esporte(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("💰 *Stake (R$):*", reply_markup=teclado_cancelar_voltar(), parse_mode="Markdown")
         return STAKE
     if ctx.user_data.pop("aguardando_esporte_custom", False):
-        ctx.user_data["esporte"] = raw
+        ctx.user_data["esporte"] = normalizar_esporte(raw)
     elif raw == "Outro":
         await update.message.reply_text("Digite o nome do esporte:", reply_markup=teclado_cancelar())
         ctx.user_data["aguardando_esporte_custom"] = True
         return ESPORTE
     else:
-        ctx.user_data["esporte"] = raw
+        ctx.user_data["esporte"] = normalizar_esporte(raw)
     teclado_casa = [[c] for c in get_casas_ordenadas()] + [[VOLTAR_BTN, CANCELAR_BTN]]
     await update.message.reply_text("🏦 *Casa de aposta:*",
         reply_markup=ReplyKeyboardMarkup(teclado_casa, resize_keyboard=True, one_time_keyboard=True),
@@ -1109,10 +1125,13 @@ async def editar_receber_casa(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Digite o nome:", reply_markup=teclado_cancelar())
         ctx.user_data["editar_campo"] = campo + "_custom"
         return EDITAR_VALOR
-    return await aplicar_edicao(update, ctx, id_alvo, campo, raw)
+    valor_final = normalizar_esporte(raw) if campo == "esporte" else raw
+    return await aplicar_edicao(update, ctx, id_alvo, campo, valor_final)
 
 async def aplicar_edicao(update, ctx, id_alvo, campo, novo_valor):
     campo_real = campo.replace("_custom","")
+    if campo_real == "esporte" and isinstance(novo_valor, str):
+        novo_valor = normalizar_esporte(novo_valor)
     if campo_real == "casa" and isinstance(novo_valor, str) and novo_valor not in get_casas_ordenadas():
         novo_valor = novo_valor.strip().title()
     atualizar_campo(id_alvo, campo_real, novo_valor)

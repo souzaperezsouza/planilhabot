@@ -14,7 +14,7 @@ from telegram.ext import (
 )
 
 TOKEN         = "8790751046:AAFHpd7q4FmgUZrq3PA4eMb06fMyMaiL5lE"
-DATABASE_URL  = os.environ.get("DATABASE_URL", "postgresql://db_junho_user:57idJbDlxsIdRiM2mxvTP9YcIGHQ2MAV@dpg-d8gtb2n7f7vs739lt170-a.oregon-postgres.render.com/db_junho")
+DATABASE_URL  = os.environ.get("DATABASE_URL", "")
 BANCA_INICIAL = 5000
 
 CASAS = [
@@ -123,9 +123,17 @@ def get_esportes_ordenados():
                     ORDER BY total DESC
                 """)
                 rows = cur.fetchall()
-        top = [r[0] for r in rows if r[0] and r[0] != "Outro"]
+        # Normaliza e deduplica mantendo ordem por frequência
+        seen = set()
+        top = []
+        for r in rows:
+            if not r[0] or r[0] == "Outro": continue
+            nome = normalizar_esporte(r[0])
+            if nome not in seen:
+                seen.add(nome)
+                top.append(nome)
         for e in ESPORTES:
-            if e not in top and e != "Outro":
+            if e not in seen and e != "Outro":
                 top.append(e)
         return top + ["Outro"]
     except Exception:

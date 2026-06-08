@@ -14,7 +14,7 @@ from telegram.ext import (
 )
 
 TOKEN         = "8790751046:AAFHpd7q4FmgUZrq3PA4eMb06fMyMaiL5lE"
-DATABASE_URL  = os.environ.get("DATABASE_URL", "")
+DATABASE_URL  = os.environ.get("DATABASE_URL", "postgresql://db_junho_user:57idJbDlxsIdRiM2mxvTP9YcIGHQ2MAV@dpg-d8gtb2n7f7vs739lt170-a.oregon-postgres.render.com/db_junho")
 BANCA_INICIAL = 5000
 
 CASAS = [
@@ -307,7 +307,14 @@ def set_unidade_atual(valor):
 def normalizar_casa(s):
     s = (s or "").strip()
     if not s: return "Sem casa"
-    return MAPA_CASAS_GEMEAS.get(s, s.title() if s not in CASAS else s)
+    # Tenta match exato primeiro, depois case-insensitive
+    if s in MAPA_CASAS_GEMEAS:
+        return MAPA_CASAS_GEMEAS[s]
+    s_lower = s.lower()
+    for k, v in MAPA_CASAS_GEMEAS.items():
+        if k.lower() == s_lower:
+            return v
+    return s if s in CASAS else s.title()
 
 MAPA_ESPORTE = {
     # Futebol

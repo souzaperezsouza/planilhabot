@@ -145,9 +145,10 @@ logging.basicConfig(level=logging.WARNING)
 DATA, HORARIO, DESCRICAO, ODD, STAKE, ESPORTE, CASA = range(7)
 ATUALIZAR_ID, ATUALIZAR_RES                         = range(7, 9)
 EDITAR_ID, EDITAR_CAMPO, EDITAR_VALOR, EDITAR_CASA  = range(9, 13)
-MUDAR_UNIDADE_VALOR                                 = 13
-RESULTADOS_MENU                                     = 14
-GERAR_MENU                                          = 15
+EDITAR_PAGINA                                       = 13
+MUDAR_UNIDADE_VALOR                                 = 14
+RESULTADOS_MENU                                     = 15
+GERAR_MENU                                          = 16
 
 CANCELAR_BTN = "❌ Cancelar"
 VOLTAR_BTN   = "⬅️ Voltar"
@@ -963,48 +964,116 @@ CAMPOS_LABEL     = {
     "casa":"🏦 Casa","resultado":"📊 Resultado","cashout":"💸 Cashout","freebet":"🎁 Freebet (R$)","deletar":"🗑 Deletar aposta"
 }
 
-async def editar_inicio(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    apostas   = carregar()
-    pendentes = sorted([a for a in apostas if a["resultado"] == "pendente"],
-                       key=lambda a: (str(a["data"]), a.get("horario") or ""))
-    linhas = ["✏️ *Editar aposta*\n"]
-    if pendentes:
-        linhas.append("*Apostas pendentes:*\n")
-        for a in pendentes:
-            data_fmt = a["data"].strftime("%d/%m") if hasattr(a["data"],"strftime") else str(a["data"])[:10]
-            hora = f" {a.get('horario','')}" if a.get("horario") else ""
-            linhas.append(f"⏳ *#{a['id']}* {data_fmt}{hora} | odd {float(a['odd']):g} | _{str(a['descricao'])[:30]}_")
-        linhas.append("")
-    else:
-        linhas.append("Nenhuma aposta pendente.\n")
-    linhas.append("Digite o *ID* da aposta que quer editar:")
-    await update.message.reply_text("\n".join(linhas), reply_markup=teclado_cancelar(), parse_mode="Markdown")
-    return EDITAR_ID
+APOSTAS_POR_PAGINA = 20
 
-async def editar_receber_id(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+def _montar_mensagem_pagina(apostas_todas, pagina):
+    """Monta o texto e o teclado de uma página da listagem de apostas para editar."""
+    total = len(apostas_todas)
+    total_paginas = max(1, (total + APOSTAS_POR_PAGINA - 1) // APOSTAS_POR_PAGINA)
+    pagina = max(0, min(pagina, total_paginas - 1))
+    inicio = pagina * APOSTAS_POR_PAGINA
+    fatia  = apostas_todas[inicio: inicio + APOSTAS_POR_PAGINA]
+
+    linhas = [f"✏️ *Editar aposta* — Página {pagina + 1}/{total_paginas} ({total} apostas)\n"]
+    for a in fatia:
+        data_fmt = a["data"].strftime("%d/%m") if hasattr(a["data"], "strftime") else str(a["data"])[:10]
+        hora     = f" {a.get('horario','')}" if a.get("horario") else ""
+        status   = "⏳" if a["resultado"] == "pendente" else ("✅" if a["resultado"] == "ganhou" else ("❌" if a["resultado"] == "perdeu" else "↩️"))
+        linhas.append(f"{status} *#{a['id']}* {data_fmt}{hora} | odd {float(a['odd']):g} | _{str(a['descricao'])[:28]}_")
+
+    linhas.append("\nDigite o *ID* da aposta ou navegue:")
+
+    # Teclado de navegação
+    nav = []
+    if pagina > 0:
+        nav.append("⬅️ Anterior")
+    if pagina < total_paginas - 1:
+        nav.append("➡️ Próxima")
+
+    teclado_rows = []
+    if nav:
+        teclado_rows.append(nav)
+    teclado_rows.append([CANCELAR_BTN])
+
+    return "\n".join(linhas), teclado_rows, pagina
+
+async def editar_inicio(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    apostas = carregar()
+    todas   = sorted(apostas, key=lambda a: (str(a["data"]), a.get("horario") or "", int(a["id"])))
+    ctx.user_data["editar_apostas"] = todas
+    ctx.user_data["editar_pagina"]  = 0
+
+    texto, teclado_rows, _ = _montar_mensagem_pagina(todas, 0)
+    await update.message.reply_text(
+        texto,
+        reply_markup=ReplyKeyboardMarkup(teclado_rows, resize_keyboard=True),
+        parse_mode="Markdown"
+    )
+    return EDITAR_PAGINA
+
+async def editar_navegar(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Handler do estado EDITAR_PAGINA — recebe navegação ou ID."""
     raw = update.message.text.strip()
-    if raw == CANCELAR_BTN: return await cancelar(update, ctx)
+    if raw == CANCELAR_BTN:
+        return await cancelar(update, ctx)
+
+    todas   = ctx.user_data.get("editar_apostas", [])
+    pagina  = ctx.user_data.get("editar_pagina", 0)
+    total_paginas = max(1, (len(todas) + APOSTAS_POR_PAGINA - 1) // APOSTAS_POR_PAGINA)
+
+    if raw == "➡️ Próxima":
+        pagina = min(pagina + 1, total_paginas - 1)
+        ctx.user_data["editar_pagina"] = pagina
+        texto, teclado_rows, _ = _montar_mensagem_pagina(todas, pagina)
+        await update.message.reply_text(
+            texto,
+            reply_markup=ReplyKeyboardMarkup(teclado_rows, resize_keyboard=True),
+            parse_mode="Markdown"
+        )
+        return EDITAR_PAGINA
+
+    if raw == "⬅️ Anterior":
+        pagina = max(pagina - 1, 0)
+        ctx.user_data["editar_pagina"] = pagina
+        texto, teclado_rows, _ = _montar_mensagem_pagina(todas, pagina)
+        await update.message.reply_text(
+            texto,
+            reply_markup=ReplyKeyboardMarkup(teclado_rows, resize_keyboard=True),
+            parse_mode="Markdown"
+        )
+        return EDITAR_PAGINA
+
+    # Tentou digitar um ID
     try:
         id_alvo = int(raw)
     except ValueError:
-        await update.message.reply_text("❌ Digite só o número do ID:")
-        return EDITAR_ID
+        await update.message.reply_text("❌ Digite o número do ID ou use os botões de navegação:")
+        return EDITAR_PAGINA
+
     aposta = buscar_por_id(id_alvo)
     if not aposta:
-        await update.message.reply_text("❌ ID não encontrado.")
-        return EDITAR_ID
+        await update.message.reply_text("❌ ID não encontrado. Tente outro:")
+        return EDITAR_PAGINA
+
     ctx.user_data["editar_id"] = id_alvo
-    data_fmt = aposta["data"].strftime("%d/%m/%Y") if hasattr(aposta["data"],"strftime") else str(aposta["data"])[:10]
-    hora = f" {aposta.get('horario','')}" if aposta.get("horario") else ""
-    _label_res = {"ganhou":"Green ✅","perdeu":"Red ❌","void":"Void ↩️","pendente":"Pendente ⏳"}
-    info = (f"✏️ *Aposta #{id_alvo}*\n\n📅 {data_fmt}{hora}\n🏷 {aposta['descricao']}\n"
-            f"🔢 Odd: {float(aposta['odd']):g}\n💰 Stake: R$ {float(aposta['stake']):.2f}\n"
-            f"🏦 Casa: {aposta.get('casa','')}\n📊 Resultado: {_label_res.get(aposta['resultado'], aposta['resultado'])}\n🎁 Freebet: R$ {float(aposta['freebet'] or 0):.2f}\n\n*Qual campo editar?*")
+    data_fmt = aposta["data"].strftime("%d/%m/%Y") if hasattr(aposta["data"], "strftime") else str(aposta["data"])[:10]
+    hora     = f" {aposta.get('horario','')}" if aposta.get("horario") else ""
+    _label_res = {"ganhou": "Green ✅", "perdeu": "Red ❌", "void": "Void ↩️", "pendente": "Pendente ⏳"}
+    info = (
+        f"✏️ *Aposta #{id_alvo}*\n\n📅 {data_fmt}{hora}\n🏷 {aposta['descricao']}\n"
+        f"🔢 Odd: {float(aposta['odd']):g}\n💰 Stake: R$ {float(aposta['stake']):.2f}\n"
+        f"🏦 Casa: {aposta.get('casa','')}\n📊 Resultado: {_label_res.get(aposta['resultado'], aposta['resultado'])}\n"
+        f"🎁 Freebet: R$ {float(aposta['freebet'] or 0):.2f}\n\n*Qual campo editar?*"
+    )
     teclado = [[CAMPOS_LABEL[c]] for c in CAMPOS_EDITAVEIS] + [[CANCELAR_BTN]]
-    await update.message.reply_text(info,
+    await update.message.reply_text(
+        info,
         reply_markup=ReplyKeyboardMarkup(teclado, resize_keyboard=True, one_time_keyboard=True),
-        parse_mode="Markdown")
+        parse_mode="Markdown"
+    )
     return EDITAR_CAMPO
+
+
 
 async def editar_receber_campo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     raw = update.message.text.strip()
@@ -2076,7 +2145,7 @@ def main():
     conv_editar = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^✏️ Editar aposta$"), editar_inicio)],
         states={
-            EDITAR_ID:    [MessageHandler(filters.TEXT & ~filters.COMMAND, editar_receber_id)],
+            EDITAR_PAGINA: [MessageHandler(filters.TEXT & ~filters.COMMAND, editar_navegar)],
             EDITAR_CAMPO: [MessageHandler(filters.TEXT & ~filters.COMMAND, editar_receber_campo)],
             EDITAR_VALOR: [MessageHandler(filters.TEXT & ~filters.COMMAND, editar_receber_valor)],
             EDITAR_CASA:  [MessageHandler(filters.TEXT & ~filters.COMMAND, editar_receber_casa)],

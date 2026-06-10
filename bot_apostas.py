@@ -974,14 +974,14 @@ def _montar_mensagem_pagina(apostas_todas, pagina):
     inicio = pagina * APOSTAS_POR_PAGINA
     fatia  = apostas_todas[inicio: inicio + APOSTAS_POR_PAGINA]
 
-    linhas = [f"✏️ *Editar aposta* — Página {pagina + 1}/{total_paginas} ({total} apostas)\n"]
+    linhas = [f"✏️ *Editar aposta* — Página {pagina + 1}/{total_paginas} ({total} pendentes)\n"]
     for a in fatia:
         data_fmt = a["data"].strftime("%d/%m") if hasattr(a["data"], "strftime") else str(a["data"])[:10]
         hora     = f" {a.get('horario','')}" if a.get("horario") else ""
         status   = "⏳" if a["resultado"] == "pendente" else ("✅" if a["resultado"] == "ganhou" else ("❌" if a["resultado"] == "perdeu" else "↩️"))
         linhas.append(f"{status} *#{a['id']}* {data_fmt}{hora} | odd {float(a['odd']):g} | _{str(a['descricao'])[:28]}_")
 
-    linhas.append("\nDigite o *ID* da aposta ou navegue:")
+    linhas.append("\nDigite o *ID* da aposta ou navegue:\n_💡 Para editar uma já resolvida, basta digitar o ID._")
 
     # Teclado de navegação
     nav = []
@@ -998,8 +998,9 @@ def _montar_mensagem_pagina(apostas_todas, pagina):
     return "\n".join(linhas), teclado_rows, pagina
 
 async def editar_inicio(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    apostas = carregar()
-    todas   = sorted(apostas, key=lambda a: (str(a["data"]), a.get("horario") or "", int(a["id"])))
+    apostas   = carregar()
+    pendentes = [a for a in apostas if a["resultado"] == "pendente"]
+    todas     = sorted(pendentes, key=lambda a: (str(a["data"]), a.get("horario") or "", int(a["id"])))
     ctx.user_data["editar_apostas"] = todas
     ctx.user_data["editar_pagina"]  = 0
 

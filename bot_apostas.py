@@ -405,6 +405,39 @@ def eh_cashout(a):
     """Retorna True se a aposta void foi um cashout (tem cashout_valor > 0)."""
     return a["resultado"] == "void" and float(a.get("cashout_valor") or 0) > 0
 
+LIMITE_TELEGRAM = 3500  # margem de segurança abaixo do limite real (4096)
+
+def paginar_linhas(linhas, limite=LIMITE_TELEGRAM):
+    """Agrupa uma lista de linhas (strings) em blocos que respeitam o limite
+    de caracteres do Telegram, sem cortar uma linha ao meio."""
+    paginas = []
+    atual = []
+    tamanho = 0
+    for linha in linhas:
+        tam_linha = len(linha) + 1  # +1 do \n
+        if atual and tamanho + tam_linha > limite:
+            paginas.append("\n".join(atual))
+            atual = []
+            tamanho = 0
+        atual.append(linha)
+        tamanho += tam_linha
+    if atual:
+        paginas.append("\n".join(atual))
+    return paginas
+
+async def enviar_paginado(update, linhas, reply_markup=None, parse_mode="Markdown"):
+    """Envia uma lista de linhas como uma ou mais mensagens, respeitando o
+    limite de caracteres do Telegram. O teclado só vai na última mensagem."""
+    paginas = paginar_linhas(linhas)
+    total = len(paginas)
+    for i, pagina in enumerate(paginas):
+        prefixo = f"📄 _Página {i+1}/{total}_\n\n" if total > 1 else ""
+        await update.message.reply_text(
+            prefixo + pagina,
+            reply_markup=reply_markup if i == total - 1 else None,
+            parse_mode=parse_mode
+        )
+
 async def voltar_menu(update, ctx):
     ctx.user_data.clear()
     await update.message.reply_text("O que mais?", reply_markup=teclado_menu())
@@ -654,9 +687,7 @@ async def ver_pendentes(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         data_fmt = a["data"].strftime("%d/%m/%Y") if hasattr(a["data"],"strftime") else str(a["data"])[:10]
         hora = f" {a.get('horario','')}" if a.get("horario") else ""
         linhas.append(f"*#{a['id']}* {data_fmt}{hora} | odd {float(a['odd']):g} | R${float(a['stake']):.0f} | {a.get('casa','')}\n_{a['descricao']}_\n")
-    await update.message.reply_text("\n".join(linhas), parse_mode="Markdown")
-
-# ── RESULTADOS ────────────────────────────────────────────────────────────────
+    await enviar_paginado(update, linhas, parse_mode="Markdown")
 NOMES_MES_PT = {
     "janeiro":1,"jan":1,"fevereiro":2,"fev":2,"março":3,"mar":3,"abril":4,"abr":4,
     "maio":5,"mai":5,"junho":6,"jun":6,"julho":7,"jul":7,"agosto":8,"ago":8,
@@ -741,7 +772,7 @@ async def resultados_por_casa(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         sinal = "+" if c["lucro"] >= 0 else ""
         linhas.append(f"{emoji} *{nome}*\n  {c['ap']} ap | {c['g']}V/{c['ap']-c['g']}D | {sinal}R$ {c['lucro']:.2f} | ROI: {roi:+.1%}\n")
     linhas.append("\nDigite uma data (DD/MM) ou 🔙 Voltar:")
-    await update.message.reply_text("\n".join(linhas), reply_markup=teclado_resultados(), parse_mode="Markdown")
+    await enviar_paginado(update, linhas, reply_markup=teclado_resultados(), parse_mode="Markdown")
 
 async def resultados_por_mes(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     apostas = carregar()
@@ -780,7 +811,7 @@ async def resultados_por_mes(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     sinal_ac = "+" if acum >= 0 else ""
     linhas.append(f"📊 *Acumulado: {sinal_ac}R$ {acum:.2f}*")
     linhas.append("\nDigite uma data (DD/MM), 🏦 *Por Casa* ou 🔙 *Voltar*:")
-    await update.message.reply_text("\n".join(linhas), reply_markup=teclado_resultados(), parse_mode="Markdown")
+    await enviar_paginado(update, linhas, reply_markup=teclado_resultados(), parse_mode="Markdown")
 
 async def resultados_por_mes_especifico(update: Update, ctx: ContextTypes.DEFAULT_TYPE, mes: int, ano: int = None):
     """Mostra resultado de um mês específico (ex: 'Janeiro', 'Abr/2025')."""
@@ -841,7 +872,7 @@ async def resultados_por_esporte(update: Update, ctx: ContextTypes.DEFAULT_TYPE)
         sinal = "+" if e["lucro"] >= 0 else ""
         linhas.append(f"{emoji} *{nome}*\n  {e['ap']} ap | {e['g']}V/{e['ap']-e['g']}D | {sinal}R$ {e['lucro']:.2f} | ROI: {roi:+.1%}\n")
     linhas.append("\nDigite uma data (DD/MM) ou 🔙 Voltar:")
-    await update.message.reply_text("\n".join(linhas), reply_markup=teclado_resultados(), parse_mode="Markdown")
+    await enviar_paginado(update, linhas, reply_markup=teclado_resultados(), parse_mode="Markdown")
 
 async def resultados_dia(update: Update, ctx: ContextTypes.DEFAULT_TYPE, raw: str) -> bool:
     agora = datetime.now()
@@ -917,7 +948,7 @@ async def resultados_dia(update: Update, ctx: ContextTypes.DEFAULT_TYPE, raw: st
         else:
             linhas.append(f"{emojis_res.get(a['resultado'],'')} *#{a['id']}* odd {float(a['odd']):g} | R${float(a['stake']):.2f} → {s}R$ {l:.2f} ({l_u:+.2f}u)\n_{a['descricao']}_\n")
     linhas.append("Digite outra data, 🏦 *Por Casa* ou 🔙 *Voltar*:")
-    await update.message.reply_text("\n".join(linhas), reply_markup=teclado_resultados(), parse_mode="Markdown")
+    await enviar_paginado(update, linhas, reply_markup=teclado_resultados(), parse_mode="Markdown")
     return True
 
 async def resultados_resposta(update: Update, ctx: ContextTypes.DEFAULT_TYPE):

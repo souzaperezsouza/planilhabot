@@ -14,7 +14,7 @@ from telegram.ext import (
 )
 
 TOKEN         = "8790751046:AAFHpd7q4FmgUZrq3PA4eMb06fMyMaiL5lE"
-DATABASE_URL  = os.environ.get("DATABASE_URL", "postgresql://db_julho_user:YP9AtSQzw3gwSle8CZZ3x9Rha7GcxpK0@dpg-d94mklu7r5hc73fb972g-a.oregon-postgres.render.com/db_julho")
+DATABASE_URL  = os.environ.get("DATABASE_URL", "postgresql://db_junho_user:57idJbDlxsIdRiM2mxvTP9YcIGHQ2MAV@dpg-d8gtb2n7f7vs739lt170-a.oregon-postgres.render.com/db_junho")
 BANCA_INICIAL = 5000
 
 CASAS = [
@@ -709,6 +709,7 @@ async def resultados(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     emoji       = "📈" if lucro_total >= 0 else "📉"
     pendentes_ap = [a for a in apostas if a["resultado"] == "pendente"]
     stake_curso  = sum(float(a["stake"]) for a in pendentes_ap)
+    possivel_ganho = sum(float(a["stake"]) * (float(a["odd"]) - 1) for a in pendentes_ap)
     unidade_atual = get_unidade_atual()
     # Lucro em unidades: usa a unidade registrada em cada aposta
     lucro_unidades = sum(lucro_aposta(a) / float(a.get("unidade") or 50) for a in res)
@@ -746,7 +747,7 @@ async def resultados(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"💰 Lucro Total: *{sinal}R$ {lucro_total:.2f}* ({lucro_unidades:+.2f}u)\n"
         f"📊 ROI: *{roi:+.1%}* | Progressão: *{progressao:+.2%}*\n"
         f"🏆 {vitorias}V / {len(res)-vitorias}D\n"
-        f"⏳ Stake em curso: *R$ {stake_curso:.2f}* ({len(pendentes_ap)} ap)\n\n"
+        f"⏳ Stake em curso: *R$ {stake_curso:.2f}* ({len(pendentes_ap)} ap) | Possível ganho: *+R$ {possivel_ganho:.2f}*\n\n"
         f"{emoji_m} {nome_mes_atual}: *{sinal_m}R$ {lucro_mes:.2f}* ({lucro_mes_u:+.2f}u) | {len(res_mes)} ap\n"
         f"{emoji_s} Semana: *{sinal_s}R$ {lucro_semana:.2f}* ({lucro_semana_u:+.2f}u) | {len(res_semana)} ap",
         reply_markup=teclado_resultados(), parse_mode="Markdown"
@@ -916,7 +917,7 @@ async def resultados_dia(update: Update, ctx: ContextTypes.DEFAULT_TYPE, raw: st
     data_str = data_obj.strftime("%Y-%m-%d")
     apostas  = carregar()
     do_dia   = [a for a in apostas if str(a["data"])[:10] == data_str
-                and a["resultado"] in ("ganhou","perdeu","void")]
+                and (a["resultado"] in ("ganhou","perdeu") or eh_cashout(a))]
     if not do_dia:
         await update.message.reply_text(
             f"Nenhuma aposta resolvida em {data_obj.strftime('%d/%m/%Y')}.",
@@ -1377,7 +1378,7 @@ Como usar:
 """
 import psycopg2
 
-NEW_URL = "COLE_AQUI_A_EXTERNAL_URL_DO_BANCO_NOVO"  # <-- troque isso
+NEW_URL = "postgresql://db_julho_user:YP9AtSQzw3gwSle8CZZ3x9Rha7GcxpK0@dpg-d94mklu7r5hc73fb972g-a.oregon-postgres.render.com/db_julho"  # <-- troque pela External URL do banco novo quando migrar
 
 APOSTAS = [
 # (id, data, horario, descricao, odd, stake, resultado, casa, esporte, freebet, unidade, cashout_valor)
@@ -1388,8 +1389,8 @@ UNIDADE_ATUAL = "{unidade_atual:.0f}"
 MAX_ID        = {max_id}
 
 if __name__ == "__main__":
-    if NEW_URL == "COLE_AQUI_A_EXTERNAL_URL_DO_BANCO_NOVO":
-        print("❌ Troque NEW_URL pela External URL do novo banco antes de rodar.")
+    if not NEW_URL:
+        print("❌ NEW_URL está vazio. Coloque a External URL do banco novo.")
         exit(1)
 
     conn = psycopg2.connect(NEW_URL)
@@ -1430,12 +1431,12 @@ if __name__ == "__main__":
             "Funciona mesmo se o banco antigo sumir.\n\n"
             "*Como usar:*\n\n"
             "1️⃣ Salve o `migrar\\_db.py` na pasta Downloads\n"
-            "2️⃣ Abra e troque `NEW\\_URL` pela *External URL* do banco novo\n"
-            "3️⃣ No CMD:\n"
+            "2️⃣ Atualize `NEW\\_URL` no arquivo com a *External URL* do banco novo\n"
+            "3️⃣ No `bot\\_apostas.py`, atualize `DATABASE\\_URL` com a *External URL* também\n"
+            "4️⃣ No CMD:\n"
             "   `cd C:\\\\Users\\\\enzop\\\\Downloads`\n"
             "   `python migrar\\_db.py`\n"
-            "4️⃣ Render → seu serviço → Environment → `DATABASE\\_URL`\n"
-            "   Coloque a *Internal URL* → *Manual Deploy*"
+            "5️⃣ Render → Environment → `DATABASE\\_URL` = *Internal URL* → *Manual Deploy*"
         )
         await update.message.reply_document(
             document=InputFile(io.BytesIO(script_bytes), filename="migrar_db.py"),

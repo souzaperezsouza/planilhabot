@@ -1407,11 +1407,23 @@ if __name__ == "__main__":
     cur.execute("DELETE FROM apostas")
     cur.execute("DELETE FROM configuracoes")
 
-    print(f"Inserindo {{len(APOSTAS)}} apostas...")
-    for a in APOSTAS:
+    import time as _time
+    total_ap = len(APOSTAS)
+    print(f"Inserindo {{total_ap}} apostas...")
+    bar_width = 40
+    t_inicio = _time.time()
+    for i, a in enumerate(APOSTAS, 1):
         cur.execute("""INSERT INTO apostas
             (id,data,horario,descricao,odd,stake,resultado,casa,esporte,freebet,unidade,cashout_valor)
             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""", a)
+        if i % 10 == 0 or i == total_ap:
+            pct = i / total_ap
+            feito = int(bar_width * pct)
+            barra = "█" * feito + "░" * (bar_width - feito)
+            decorrido = _time.time() - t_inicio
+            estimado = (decorrido / i) * (total_ap - i) if i > 0 else 0
+            print(f"\r[{{barra}}] {{i}}/{{total_ap}} ({pct:.0%}) | ~{{estimado:.0f}}s restantes   ", end="", flush=True)
+    print()  # newline after progress bar
 
     cur.execute("""INSERT INTO configuracoes (chave,valor) VALUES (\'unidade_atual\',%s)
         ON CONFLICT (chave) DO UPDATE SET valor=EXCLUDED.valor""", (UNIDADE_ATUAL,))

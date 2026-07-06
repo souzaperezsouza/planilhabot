@@ -952,6 +952,53 @@ async def resultados_dia(update: Update, ctx: ContextTypes.DEFAULT_TYPE, raw: st
     await enviar_paginado(update, linhas, reply_markup=teclado_resultados(), parse_mode="Markdown")
     return True
 
+async def resultados_por_casa_detalhe(update: Update, ctx: ContextTypes.DEFAULT_TYPE, nome_casa: str):
+    """Mostra todas as apostas de uma casa específica."""
+    apostas = carregar()
+    res = [a for a in apostas if a["resultado"] in ("ganhou","perdeu") or eh_cashout(a)]
+
+    # Match flexível: normaliza e compara case-insensitive, ou substring
+    nome_lower = nome_casa.strip().lower()
+    do_casa = [a for a in res if
+               nome_lower in (a.get("casa") or "").lower() or
+               nome_lower in normalizar_casa(a.get("casa") or "").lower()]
+
+    if not do_casa:
+        await update.message.reply_text(
+            f"Nenhuma aposta resolvida encontrada para *{nome_casa}*.",
+            reply_markup=teclado_resultados(), parse_mode="Markdown"
+        )
+        return
+
+    lucro_c   = sum(lucro_aposta(a) for a in do_casa)
+    stake_c   = sum(float(a["stake"]) for a in do_casa)
+    g_c       = sum(1 for a in do_casa if a["resultado"] == "ganhou")
+    roi_c     = lucro_c / stake_c if stake_c else 0
+    lucro_u_c = sum(lucro_aposta(a) / float(a.get("unidade") or 50) for a in do_casa)
+    emoji_c   = "🟢" if lucro_c >= 0 else "🔴"
+    sinal_c   = "+" if lucro_c >= 0 else ""
+
+    nome_exib = normalizar_casa(do_casa[0].get("casa") or nome_casa)
+    linhas = [
+        f"🏦 *{nome_exib}* — {len(do_casa)} apostas",
+        f"{emoji_c} Lucro: *{sinal_c}R$ {lucro_c:.2f}* ({lucro_u_c:+.2f}u) | ROI: {roi_c:+.1%} | {g_c}V/{len(do_casa)-g_c}D\n"
+    ]
+
+    emojis_res = {"ganhou":"✅","perdeu":"❌","void":"↩️","pendente":"⏳"}
+    for a in sorted(do_casa, key=lambda x: (str(x["data"]), x.get("horario") or "")):
+        l   = lucro_aposta(a)
+        u_a = float(a.get("unidade") or 50)
+        l_u = l / u_a
+        s   = "+" if l >= 0 else ""
+        data_fmt = a["data"].strftime("%d/%m/%Y") if hasattr(a["data"],"strftime") else str(a["data"])[:10]
+        res_emoji = "💸" if eh_cashout(a) else emojis_res.get(a["resultado"], "")
+        linhas.append(
+            f"{res_emoji} *#{a['id']}* {data_fmt} | odd {float(a['odd']):g} | R${float(a['stake']):.2f} \u2192 {s}R$ {l:.2f} ({l_u:+.2f}u)\n_{a['descricao']}_\n"
+        )
+
+    linhas.append("Digite outra casa, data ou 🔙 *Voltar*:")
+    await enviar_paginado(update, linhas, reply_markup=teclado_resultados(), parse_mode="Markdown")
+
 async def resultados_resposta(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Handler das respostas dentro do ConversationHandler de resultados."""
     txt = update.message.text
@@ -984,8 +1031,14 @@ async def resultados_resposta(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return RESULTADOS_MENU
     if await resultados_dia(update, ctx, txt):
         return RESULTADOS_MENU
+    # Tenta match de casa de apostas
+    apostas_todas = carregar()
+    casas_banco = set(normalizar_casa(a.get("casa") or "").lower() for a in apostas_todas)
+    if txt_lower in casas_banco or any(txt_lower in c for c in casas_banco):
+        await resultados_por_casa_detalhe(update, ctx, txt)
+        return RESULTADOS_MENU
     await update.message.reply_text(
-        "❓ Não reconheci. Use os botões, digite uma data (20/05), ano (2026) ou mês (Janeiro, Abr, Fev/2025).",
+        "❓ Não reconheci. Use os botões, digite uma data (20/05), ano (2026), mês (Janeiro) ou nome de uma casa (Betano, Bet365…).",
         reply_markup=teclado_resultados()
     )
     return RESULTADOS_MENU

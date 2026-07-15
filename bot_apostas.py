@@ -589,6 +589,18 @@ async def receber_descricao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔢 *Odd:*", reply_markup=teclado_cancelar_voltar(), parse_mode="Markdown")
     return ODD
 
+def teclado_stake(unidade):
+    """Gera teclado com sugestões de stake baseadas na unidade atual."""
+    u = float(unidade)
+    sugestoes = [
+        f"1u = R${u:.2f}",
+        f"0.75u = R${u*0.75:.2f}",
+        f"0.5u = R${u*0.5:.2f}",
+        f"0.25u = R${u*0.25:.2f}",
+    ]
+    linhas = [[s] for s in sugestoes] + [[VOLTAR_BTN, CANCELAR_BTN]]
+    return ReplyKeyboardMarkup(linhas, resize_keyboard=True, one_time_keyboard=True)
+
 async def receber_odd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     raw = update.message.text.strip()
     if raw == CANCELAR_BTN: return await cancelar(update, ctx)
@@ -597,7 +609,11 @@ async def receber_odd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return DESCRICAO
     try:
         ctx.user_data["odd"] = float(raw.replace(",", "."))
-        await update.message.reply_text("💰 *Stake (R$):*", reply_markup=teclado_cancelar_voltar(), parse_mode="Markdown")
+        unidade = get_unidade_atual()
+        await update.message.reply_text(
+            f"💰 *Stake (R$):*\nUnidade atual: R$ {unidade:.2f}",
+            reply_markup=teclado_stake(unidade), parse_mode="Markdown"
+        )
         return STAKE
     except ValueError:
         await update.message.reply_text("❌ Odd inválida:")
@@ -607,8 +623,16 @@ async def receber_stake(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     raw = update.message.text.strip()
     if raw == CANCELAR_BTN: return await cancelar(update, ctx)
     if raw == VOLTAR_BTN:
-        await update.message.reply_text("🔢 *Odd:*", reply_markup=teclado_cancelar_voltar(), parse_mode="Markdown")
+        unidade = get_unidade_atual()
+        await update.message.reply_text(
+            f"🔢 *Odd:*", reply_markup=teclado_cancelar_voltar(), parse_mode="Markdown"
+        )
         return ODD
+    # Parse sugestão tipo "1u = R$80.00" ou "0.75u = R$60.00"
+    import re as _re
+    m_sug = _re.match(r"[\d.]+u\s*=\s*R\$([\d.,]+)", raw)
+    if m_sug:
+        raw = m_sug.group(1)
     try:
         ctx.user_data["stake"] = float(raw.replace(",", "."))
         teclado_esp = [[e] for e in get_esportes_ordenados()] + [[VOLTAR_BTN, CANCELAR_BTN]]
@@ -624,7 +648,11 @@ async def receber_esporte(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     raw = update.message.text.strip()
     if raw == CANCELAR_BTN: return await cancelar(update, ctx)
     if raw == VOLTAR_BTN:
-        await update.message.reply_text("💰 *Stake (R$):*", reply_markup=teclado_cancelar_voltar(), parse_mode="Markdown")
+        unidade = get_unidade_atual()
+        await update.message.reply_text(
+            f"💰 *Stake (R$):*\nUnidade atual: R$ {unidade:.2f}",
+            reply_markup=teclado_stake(unidade), parse_mode="Markdown"
+        )
         return STAKE
     if ctx.user_data.pop("aguardando_esporte_custom", False):
         ctx.user_data["esporte"] = normalizar_esporte(raw)
@@ -1971,31 +1999,118 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
 
     # ── ABA 3: LUCRO POR DIA ──
     from collections import defaultdict
+    import calendar as _cal
+    import datetime as _dtcal
+
     por_dia=defaultdict(list)
     for a in df_res:
         por_dia[str(a["data"])[:10]].append(a)
-    wd=wb.create_sheet("Lucro por Dia")
-    wd.merge_cells("A1:D1"); wd["A1"]="LUCRO POR DIA"
-    est(wd["A1"],bold=True,bg=DARK,size=14); wd.row_dimensions[1].height=34; wd.row_dimensions[2].height=8
-    for c,h in enumerate(["Data","Apostas","Lucro do Dia","Acumulado"],1):
-        cell=wd.cell(row=3,column=c,value=h); est(cell,bold=True,bg=DARK,size=10); cell.border=brd()
-    wd.row_dimensions[3].height=22
-    acum3=0
-    for i,(data_k,ap) in enumerate(sorted(por_dia.items())):
-        er=4+i; rb=WHITE if i%2==0 else ALT
-        lucro_d=sum(lucro_aposta(a) for a in ap)
-        acum3+=lucro_d
-        try: data_f=__import__("datetime").datetime.strptime(data_k,"%Y-%m-%d").strftime("%d/%m/%Y")
-        except: data_f=data_k
-        for c,val in enumerate([data_f,len(ap),lucro_d,acum3],1):
-            cell=wd.cell(row=er,column=c,value=val); fc="000000"
-            if c in (3,4): fc=cor(val)
-            cell.font=Font(name="Arial",size=10,color=fc)
-            cell.alignment=Alignment(horizontal="center",vertical="center")
-            cell.fill=PatternFill("solid",start_color=rb); cell.border=brd()
-            if c in (3,4): cell.number_format="#,##0.00"
-        wd.row_dimensions[er].height=18
-    for i,w in enumerate([14,10,18,18],1): wd.column_dimensions[get_column_letter(i)].width=w
+
+    # Descobre range de meses a gerar
+    datas_todas = sorted(por_dia.keys())
+    if datas_todas:
+        dt_min = _dtcal.datetime.strptime(datas_todas[0], "%Y-%m-%d")
+        dt_max = _dtcal.datetime.strptime(datas_todas[-1], "%Y-%m-%d")
+    else:
+        dt_min = dt_max = _dtcal.datetime.now()
+
+    # lucro por dia (dict date_str → float)
+    lucro_por_dia = {k: round(sum(lucro_aposta(a) for a in v), 2) for k,v in por_dia.items()}
+
+    # Paleta
+    BG_GREEN_STRONG = "0D5C2E"; BG_GREEN_MID = "1A8A3E"; BG_GREEN_LIGHT = "2DB55D"
+    BG_RED_STRONG   = "7B0D0D"; BG_RED_MID   = "B52020"; BG_RED_LIGHT   = "D94040"
+    BG_EMPTY        = "1E293B"; BG_TODAY      = "2D3A5C"
+    DIAS_SEMANA = ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"]
+
+    wd = wb.create_sheet("Calendário")
+    wd.sheet_view.showGridLines = False
+
+    row_cursor = 1
+    mes_atual = dt_min.replace(day=1)
+    while mes_atual <= dt_max.replace(day=1):
+        ano, mes = mes_atual.year, mes_atual.month
+        NOMES_M_CAL = ["","Janeiro","Fevereiro","Março","Abril","Maio","Junho",
+                        "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"]
+
+        # Título do mês
+        wd.merge_cells(start_row=row_cursor, start_column=1, end_row=row_cursor, end_column=7)
+        cel_titulo = wd.cell(row=row_cursor, column=1, value=f"{NOMES_M_CAL[mes].upper()}  {ano}")
+        cel_titulo.font = Font(name="Arial", bold=True, size=14, color="FFFFFF")
+        cel_titulo.fill = PatternFill("solid", start_color=DARK)
+        cel_titulo.alignment = Alignment(horizontal="center", vertical="center")
+        wd.row_dimensions[row_cursor].height = 30
+        row_cursor += 1
+
+        # Cabeçalho dias da semana
+        for c_idx, dia_nome in enumerate(DIAS_SEMANA, 1):
+            cel = wd.cell(row=row_cursor, column=c_idx, value=dia_nome)
+            cel.font = Font(name="Arial", bold=True, size=10, color="A0AEC0")
+            cel.fill = PatternFill("solid", start_color="0F172A")
+            cel.alignment = Alignment(horizontal="center", vertical="center")
+        wd.row_dimensions[row_cursor].height = 22
+        row_cursor += 1
+
+        # Gera semanas do mês (calendar.monthcalendar, semanas dom-sab)
+        cal_obj = _cal.Calendar(firstweekday=6)  # domingo=0
+        semanas = cal_obj.monthdayscalendar(ano, mes)
+
+        for semana in semanas:
+            for c_idx, dia_num in enumerate(semana, 1):
+                cel = wd.cell(row=row_cursor, column=c_idx)
+                if dia_num == 0:
+                    cel.fill = PatternFill("solid", start_color="0A1020")
+                else:
+                    data_str = f"{ano:04d}-{mes:02d}-{dia_num:02d}"
+                    lucro_d = lucro_por_dia.get(data_str)
+                    if lucro_d is None:
+                        bg = BG_EMPTY
+                        txt = str(dia_num)
+                        fc_txt = "4A5568"
+                    else:
+                        positivo = lucro_d >= 0
+                        abs_l = abs(lucro_d)
+                        if positivo:
+                            bg = BG_GREEN_STRONG if abs_l >= 500 else BG_GREEN_MID if abs_l >= 100 else BG_GREEN_LIGHT
+                        else:
+                            bg = BG_RED_STRONG if abs_l >= 500 else BG_RED_MID if abs_l >= 100 else BG_RED_LIGHT
+                        fc_txt = "FFFFFF"
+                        # Formata valor
+                        if abs_l >= 1000:
+                            val_str = f"${abs_l/1000:.1f}K" if abs_l < 10000 else f"${abs_l/1000:.0f}K"
+                        else:
+                            val_str = f"${abs_l:.0f}" if abs_l == int(abs_l) else f"${abs_l:.1f}"
+                        if not positivo: val_str = "-" + val_str
+                        txt = f"{dia_num}\n{val_str}"
+                    cel.value = txt
+                    cel.font = Font(name="Arial", bold=True, size=9, color=fc_txt)
+                    cel.fill = PatternFill("solid", start_color=bg)
+                    cel.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            wd.row_dimensions[row_cursor].height = 42
+            row_cursor += 1
+
+        # Linha de totais do mês
+        lucro_mes_cal = sum(v for k,v in lucro_por_dia.items() if k[:7]==f"{ano:04d}-{mes:02d}")
+        dias_com_acao = sum(1 for k in lucro_por_dia if k[:7]==f"{ano:04d}-{mes:02d}")
+        wd.merge_cells(start_row=row_cursor, start_column=1, end_row=row_cursor, end_column=7)
+        sinal_m = "+" if lucro_mes_cal >= 0 else ""
+        cel_tot = wd.cell(row=row_cursor, column=1, value=f"Total {NOMES_M_CAL[mes]}: {sinal_m}R$ {lucro_mes_cal:.2f}  |  {dias_com_acao} dias com apostas")
+        fc_tot = GREEN if lucro_mes_cal >= 0 else RED
+        cel_tot.font = Font(name="Arial", bold=True, size=10, color=fc_tot)
+        cel_tot.fill = PatternFill("solid", start_color="0F172A")
+        cel_tot.alignment = Alignment(horizontal="center", vertical="center")
+        wd.row_dimensions[row_cursor].height = 20
+        row_cursor += 2  # gap entre meses
+
+        # Próximo mês
+        if mes == 12:
+            mes_atual = mes_atual.replace(year=ano+1, month=1)
+        else:
+            mes_atual = mes_atual.replace(month=mes+1)
+
+    # Largura das colunas (7 colunas iguais)
+    for c_idx in range(1, 8):
+        wd.column_dimensions[get_column_letter(c_idx)].width = 14
 
     # ── ABA 3: POR CASA ──
     casas={}
@@ -2048,246 +2163,4 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
         roi_e=e["lucro"]/e["stake"] if e["stake"] else 0
         wr_e=e["g"]/e["ap"] if e["ap"] else 0
         for col,val in enumerate([nome,e["ap"],e["g"],e["ap"]-e["g"],e["stake"],e["lucro"],round(e["lucro_u"],2),roi_e,wr_e],1):
-            cell=we.cell(row=er,column=col,value=val); fc="000000"
-            if col in (6,7,8): fc=cor(val)
-            cell.font=Font(name="Arial",size=10,color=fc)
-            cell.alignment=Alignment(horizontal="left" if col==1 else "center",vertical="center")
-            cell.fill=PatternFill("solid",start_color=rb); cell.border=brd()
-            if col in (5,6): cell.number_format="#,##0.00"
-            if col==7: cell.number_format="+0.00;-0.00;0.00"
-            if col in (8,9): cell.number_format="+0.0%;-0.0%;0.0%"
-        we.row_dimensions[er].height=18
-    for i,w in enumerate([18,10,10,10,14,14,14,10,12],1): we.column_dimensions[get_column_letter(i)].width=w
-
-    # ── ABA 5: POR SEMANA (domingo a sabado) ──
-    import datetime as dt_mod
-    def domingo_da_semana(dt):
-        """Retorna o domingo que inicia a semana (dom-sab) de uma data."""
-        # Garante que seja datetime (date.replace não aceita hour/minute/second)
-        if not isinstance(dt, dt_mod.datetime):
-            if isinstance(dt, dt_mod.date):
-                dt = dt_mod.datetime(dt.year, dt.month, dt.day)
-            else:
-                dt = dt_mod.datetime.strptime(str(dt)[:10], "%Y-%m-%d")
-        dias = (dt.weekday() + 1) % 7
-        return (dt - timedelta(days=dias)).replace(hour=0, minute=0, second=0, microsecond=0)
-    por_sem=defaultdict(list)
-    for a in df_res:
-        dom=domingo_da_semana(a["data"])
-        por_sem[dom].append(a)
-    ws2=wb.create_sheet("Por Semana")
-    ws2.merge_cells("A1:I1"); ws2["A1"]="POR SEMANA"
-    est(ws2["A1"],bold=True,bg=DARK,size=14); ws2.row_dimensions[1].height=34; ws2.row_dimensions[2].height=8
-    for c,h in enumerate(["Semana","Periodo","Apostas","Ganhou","Perdeu","Stake","Lucro R$","Lucro Units","ROI"],1):
-        cell=ws2.cell(row=3,column=c,value=h); est(cell,bold=True,bg=DARK,size=10); cell.border=brd()
-    ws2.row_dimensions[3].height=22
-    for i,(dom,ap) in enumerate(sorted(por_sem.items())):
-        er=4+i; rb=WHITE if i%2==0 else ALT
-        lucro_s=sum(lucro_aposta(a) for a in ap)
-        stake_s=sum(float(a["stake"]) for a in ap)
-        g_s=sum(1 for a in ap if a["resultado"]=="ganhou")
-        roi_s=lucro_s/stake_s if stake_s else 0
-        lucro_u_s=sum(lucro_aposta(a)/float(a.get("unidade") or 50) for a in ap)
-        sab=dom+timedelta(days=6)
-        num_semana=dom.isocalendar()[1]
-        periodo=f"{dom.strftime('%d/%m')} - {sab.strftime('%d/%m/%Y')}"
-        for col,val in enumerate([f"Semana {num_semana}",periodo,len(ap),g_s,len(ap)-g_s,stake_s,lucro_s,round(lucro_u_s,2),roi_s],1):
-            cell=ws2.cell(row=er,column=col,value=val); fc="000000"
-            if col in (7,8,9): fc=cor(val)
-            cell.font=Font(name="Arial",size=10,color=fc)
-            cell.alignment=Alignment(horizontal="left" if col==2 else "center",vertical="center")
-            cell.fill=PatternFill("solid",start_color=rb); cell.border=brd()
-            if col in (6,7): cell.number_format="#,##0.00"
-            if col==8: cell.number_format="+0.00;-0.00;0.00"
-            if col==9: cell.number_format="+0.0%;-0.0%;0.0%"
-        ws2.row_dimensions[er].height=18
-    for i,w in enumerate([12,22,10,10,10,14,14,14,10],1): ws2.column_dimensions[get_column_letter(i)].width=w
-
-    # ── ABA 6: POR MÊS ──
-    from collections import defaultdict as _dd2
-    NOMES_MES_XL = ["","Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"]
-    por_mes_xl = _dd2(list)
-    for a in df_res:
-        d = a["data"] if hasattr(a["data"],"strftime") else __import__("datetime").datetime.strptime(str(a["data"])[:10],"%Y-%m-%d")
-        por_mes_xl[d.strftime("%Y-%m")].append(a)
-
-    wm = wb.create_sheet("Por Mes")
-    wm.merge_cells("A1:I1"); wm["A1"] = "POR MÊS"
-    est(wm["A1"],bold=True,bg=DARK,size=14); wm.row_dimensions[1].height=34; wm.row_dimensions[2].height=8
-    for c,h in enumerate(["Mês","Apostas","Ganhou","Perdeu","Stake","Lucro R$","Lucro Units","ROI","Win Rate"],1):
-        cell=wm.cell(row=3,column=c,value=h); est(cell,bold=True,bg=DARK,size=10); cell.border=brd()
-    wm.row_dimensions[3].height=22
-
-    acum_m = 0
-    for i,chave in enumerate(sorted(por_mes_xl.keys())):
-        ap_m = por_mes_xl[chave]
-        ano_m,mes_m = int(chave[:4]),int(chave[5:])
-        lucro_m  = sum(lucro_aposta(a) for a in ap_m)
-        stake_m  = sum(float(a["stake"]) for a in ap_m)
-        g_m      = sum(1 for a in ap_m if a["resultado"]=="ganhou")
-        roi_m    = lucro_m/stake_m if stake_m else 0
-        wr_m     = g_m/len(ap_m) if ap_m else 0
-        # Lucro em unidades: cada aposta usa a unidade registrada nela
-        lucro_u_m = sum(lucro_aposta(a)/float(a.get("unidade") or 50) for a in ap_m)
-        acum_m  += lucro_m
-        er=4+i; rb=WHITE if i%2==0 else ALT
-        for col,val in enumerate([f"{NOMES_MES_XL[mes_m]}/{ano_m}",len(ap_m),g_m,len(ap_m)-g_m,stake_m,lucro_m,round(lucro_u_m,2),roi_m,wr_m],1):
-            cell=wm.cell(row=er,column=col,value=val); fc="000000"
-            if col in (6,7,8): fc=cor(val)
-            cell.font=Font(name="Arial",size=10,color=fc)
-            cell.alignment=Alignment(horizontal="left" if col==1 else "center",vertical="center")
-            cell.fill=PatternFill("solid",start_color=rb); cell.border=brd()
-            if col in (5,6): cell.number_format="#,##0.00"
-            if col==7: cell.number_format="+0.00;-0.00;0.00"
-            if col in (8,9): cell.number_format="+0.0%;-0.0%;0.0%"
-        wm.row_dimensions[er].height=18
-
-    # Linha de total
-    tr_m = 4+len(por_mes_xl)
-    for col in range(1,10):
-        cell=wm.cell(row=tr_m,column=col)
-        if col==1: cell.value="TOTAL"
-        elif col==2: cell.value=len(df_res)
-        elif col==3: cell.value=sum(1 for a in df_res if a["resultado"]=="ganhou")
-        elif col==4: cell.value=sum(1 for a in df_res if a["resultado"]=="perdeu")
-        elif col==5: cell.value=round(sum(float(a["stake"]) for a in df_res),2); cell.number_format="#,##0.00"
-        elif col==6: cell.value=round(sum(lucro_aposta(a) for a in df_res),2); cell.number_format="#,##0.00"; fc=cor(cell.value); cell.font=Font(name="Arial",bold=True,size=10,color=fc)
-        elif col==7:
-            total_u=sum(lucro_aposta(a)/float(a.get("unidade") or 50) for a in df_res)
-            cell.value=round(total_u,2); cell.number_format="+0.00;-0.00;0.00"; fc=cor(cell.value); cell.font=Font(name="Arial",bold=True,size=10,color=fc)
-        if col not in (6,7): cell.font=Font(name="Arial",bold=True,size=10,color="FFFFFF")
-        est(cell,bold=True,bg=DARK,size=10); cell.border=brd()
-    wm.row_dimensions[tr_m].height=22
-    for i,w in enumerate([12,10,10,10,14,14,14,10,12],1): wm.column_dimensions[get_column_letter(i)].width=w
-
-    # ── ABA 7: GRAFICO ──
-    wg=wb.create_sheet("Evolucao da Banca")
-    wg["A1"]="Aposta #"; wg["B1"]="Banca Acumulada"
-    for i,(val) in enumerate(banca_acum,2):
-        wg.cell(row=i,column=1,value=i-1); wg.cell(row=i,column=2,value=round(val,2))
-    if len(banca_acum)>=2:
-        chart=LineChart(); chart.title="Evolucao da Banca"; chart.style=10
-        chart.y_axis.title="R$"; chart.x_axis.title="Aposta #"
-        chart.y_axis.numFmt="#,##0.00"; chart.width=26; chart.height=14
-        dr=Reference(wg,min_col=2,min_row=1,max_row=len(banca_acum)+1)
-        cr=Reference(wg,min_col=1,min_row=2,max_row=len(banca_acum)+1)
-        chart.add_data(dr,titles_from_data=True); chart.set_categories(cr)
-        chart.series[0].graphicalProperties.line.solidFill="2563EB"
-        chart.series[0].graphicalProperties.line.width=22000
-        wg.add_chart(chart,"D2")
-
-    # Salvar na memória e enviar
-    buf=io.BytesIO(); wb.save(buf); buf.seek(0)
-    from datetime import datetime as dt2
-    nome_arq=f"dashboard_{dt2.now().strftime('%d%m%Y_%H%M')}.xlsx"
-    await update.message.reply_document(
-        document=InputFile(buf, filename=nome_arq),
-        caption=f"Dashboard gerado! {total} apostas | R$ {lucro_total:.2f} lucro | ROI {roi:+.1%}"
-    )
-
-# ── EXPORTAR CSV ──────────────────────────────────────────────────────────────
-async def exportar_csv(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    apostas   = carregar()
-    total     = len(apostas)
-    pendentes = sum(1 for a in apostas if a["resultado"] == "pendente")
-    import io
-    output = io.StringIO()
-    import csv as csv_mod
-    writer = csv_mod.writer(output, quoting=csv_mod.QUOTE_ALL)
-    writer.writerow(["id","data","horario","descricao","odd","stake","resultado","casa","esporte"])
-    for a in apostas:
-        data = a["data"].strftime("%Y-%m-%d") if hasattr(a["data"],"strftime") else str(a["data"])
-        writer.writerow([a["id"],data,a.get("horario",""),a["descricao"],a["odd"],a["stake"],a["resultado"],a.get("casa",""),a.get("esporte","")])
-    csv_bytes = output.getvalue().encode("utf-8")
-    caption   = f"\U0001f4ca apostas.csv\n{total} apostas | {pendentes} pendentes"
-    await update.message.reply_document(document=InputFile(csv_bytes, filename="apostas.csv"), caption=caption)
-
-# ── SERVIDOR KEEP-ALIVE ───────────────────────────────────────────────────────
-class PingHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
-    def do_HEAD(self):
-        self.send_response(200); self.end_headers()
-    def log_message(self, *args): pass
-
-def iniciar_servidor():
-    port = int(os.environ.get("PORT", 8080))
-    HTTPServer(("0.0.0.0", port), PingHandler).serve_forever()
-
-# ── MAIN ──────────────────────────────────────────────────────────────────────
-def main():
-    inicializar_db()
-    app = Application.builder().token(TOKEN).build()
-
-    BOTOES_MENU = ["📝 Nova aposta","⏳ Ver pendentes","📈 Resultados","✏️ Editar aposta","📊 Gerar Resultados","⚙️ Mudar Unidade"]
-    fallbacks_padrao = [
-        CommandHandler("cancelar", cancelar),
-        MessageHandler(filters.Regex(f"^{CANCELAR_BTN}$"), cancelar),
-        MessageHandler(filters.Regex("^(" + "|".join(re.escape(b) for b in BOTOES_MENU) + ")$"), cancelar),
-    ]
-
-    conv_nova = ConversationHandler(
-        entry_points=[MessageHandler(filters.Regex("^📝 Nova aposta$"), nova_aposta_inicio)],
-        states={
-            DATA:      [MessageHandler(filters.TEXT & ~filters.COMMAND, receber_data)],
-            HORARIO:   [MessageHandler(filters.TEXT & ~filters.COMMAND, receber_horario)],
-            DESCRICAO: [MessageHandler(filters.TEXT & ~filters.COMMAND, receber_descricao)],
-            ODD:       [MessageHandler(filters.TEXT & ~filters.COMMAND, receber_odd)],
-            STAKE:     [MessageHandler(filters.TEXT & ~filters.COMMAND, receber_stake)],
-            ESPORTE:   [MessageHandler(filters.TEXT & ~filters.COMMAND, receber_esporte)],
-            CASA:      [MessageHandler(filters.TEXT & ~filters.COMMAND, receber_casa)],
-        },
-        fallbacks=fallbacks_padrao,
-    )
-
-    conv_editar = ConversationHandler(
-        entry_points=[MessageHandler(filters.Regex("^✏️ Editar aposta$"), editar_inicio)],
-        states={
-            EDITAR_PAGINA: [MessageHandler(filters.TEXT & ~filters.COMMAND, editar_navegar)],
-            EDITAR_CAMPO: [MessageHandler(filters.TEXT & ~filters.COMMAND, editar_receber_campo)],
-            EDITAR_VALOR: [MessageHandler(filters.TEXT & ~filters.COMMAND, editar_receber_valor)],
-            EDITAR_CASA:  [MessageHandler(filters.TEXT & ~filters.COMMAND, editar_receber_casa)],
-        },
-        fallbacks=fallbacks_padrao,
-    )
-
-    conv_unidade = ConversationHandler(
-        entry_points=[MessageHandler(filters.Regex("^⚙️ Mudar Unidade$"), mudar_unidade_inicio)],
-        states={
-            MUDAR_UNIDADE_VALOR: [MessageHandler(filters.TEXT & ~filters.COMMAND, mudar_unidade_receber)],
-        },
-        fallbacks=fallbacks_padrao,
-    )
-
-    conv_resultados = ConversationHandler(
-        entry_points=[MessageHandler(filters.Regex("^📈 Resultados$"), resultados)],
-        states={
-            RESULTADOS_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, resultados_resposta)],
-        },
-        fallbacks=fallbacks_padrao,
-    )
-
-    conv_gerar = ConversationHandler(
-        entry_points=[MessageHandler(filters.Regex("^📊 Gerar Resultados$"), gerar_menu)],
-        states={
-            GERAR_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, gerar_resposta)],
-        },
-        fallbacks=fallbacks_padrao,
-    )
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("exportar", exportar_csv))
-    app.add_handler(CommandHandler("migrar_casas", cmd_migrar_casas))
-    app.add_handler(conv_nova)
-    app.add_handler(conv_editar)
-    app.add_handler(conv_unidade)
-    app.add_handler(conv_resultados)
-    app.add_handler(conv_gerar)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_botao))
-
-    threading.Thread(target=iniciar_servidor, daemon=True).start()
-    print("🤖 Bot rodando! Abra o Telegram e mande /start")
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
+            cell=we.cell(row=er,column=c

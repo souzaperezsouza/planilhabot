@@ -14,7 +14,7 @@ from telegram.ext import (
 )
 
 TOKEN         = "8790751046:AAFHpd7q4FmgUZrq3PA4eMb06fMyMaiL5lE"
-DATABASE_URL  = os.environ.get("DATABASE_URL", "postgresql://db_julho_user:YP 9AtSQzw3gwsle8CzZ3x9Rha7GcxpK0 @dpg-d94mklu7r5hc73fb972g -a.oregon-postgres.render.com/ db_julho")
+DATABASE_URL  = os.environ.get("DATABASE_URL", "postgresql://db_julho_user:YP9AtSQzw3gwSle8CZZ3x9Rha7GcxpK0@dpg-d94mklu7r5hc73fb972g-a.oregon-postgres.render.com/db_julho")
 BANCA_INICIAL = 5000
 
 CASAS = [

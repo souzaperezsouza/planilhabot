@@ -14,7 +14,7 @@ from telegram.ext import (
 )
 
 TOKEN         = "8790751046:AAFHpd7q4FmgUZrq3PA4eMb06fMyMaiL5lE"
-DATABASE_URL  = os.environ.get("DATABASE_URL", "postgresql://db_julho_user:YP9AtSQzw3gwSle8CZZ3x9Rha7GcxpK0@dpg-d94mklu7r5hc73fb972g-a.oregon-postgres.render.com/db_julho")
+DATABASE_URL  = os.environ.get("DATABASE_URL", "postgresql://db_junho_user:57idJbDlxsIdRiM2mxvTP9YcIGHQ2MAV@dpg-d8gtb2n7f7vs739lt170-a.oregon-postgres.render.com/db_junho")
 BANCA_INICIAL = 5000
 
 CASAS = [
@@ -2163,4 +2163,246 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
         roi_e=e["lucro"]/e["stake"] if e["stake"] else 0
         wr_e=e["g"]/e["ap"] if e["ap"] else 0
         for col,val in enumerate([nome,e["ap"],e["g"],e["ap"]-e["g"],e["stake"],e["lucro"],round(e["lucro_u"],2),roi_e,wr_e],1):
-            cell=we.cell(row=er,column=c
+            cell=we.cell(row=er,column=col,value=val); fc="000000"
+            if col in (6,7,8): fc=cor(val)
+            cell.font=Font(name="Arial",size=10,color=fc)
+            cell.alignment=Alignment(horizontal="left" if col==1 else "center",vertical="center")
+            cell.fill=PatternFill("solid",start_color=rb); cell.border=brd()
+            if col in (5,6): cell.number_format="#,##0.00"
+            if col==7: cell.number_format="+0.00;-0.00;0.00"
+            if col in (8,9): cell.number_format="+0.0%;-0.0%;0.0%"
+        we.row_dimensions[er].height=18
+    for i,w in enumerate([18,10,10,10,14,14,14,10,12],1): we.column_dimensions[get_column_letter(i)].width=w
+
+    # ── ABA 5: POR SEMANA (domingo a sabado) ──
+    import datetime as dt_mod
+    def domingo_da_semana(dt):
+        """Retorna o domingo que inicia a semana (dom-sab) de uma data."""
+        # Garante que seja datetime (date.replace não aceita hour/minute/second)
+        if not isinstance(dt, dt_mod.datetime):
+            if isinstance(dt, dt_mod.date):
+                dt = dt_mod.datetime(dt.year, dt.month, dt.day)
+            else:
+                dt = dt_mod.datetime.strptime(str(dt)[:10], "%Y-%m-%d")
+        dias = (dt.weekday() + 1) % 7
+        return (dt - timedelta(days=dias)).replace(hour=0, minute=0, second=0, microsecond=0)
+    por_sem=defaultdict(list)
+    for a in df_res:
+        dom=domingo_da_semana(a["data"])
+        por_sem[dom].append(a)
+    ws2=wb.create_sheet("Por Semana")
+    ws2.merge_cells("A1:I1"); ws2["A1"]="POR SEMANA"
+    est(ws2["A1"],bold=True,bg=DARK,size=14); ws2.row_dimensions[1].height=34; ws2.row_dimensions[2].height=8
+    for c,h in enumerate(["Semana","Periodo","Apostas","Ganhou","Perdeu","Stake","Lucro R$","Lucro Units","ROI"],1):
+        cell=ws2.cell(row=3,column=c,value=h); est(cell,bold=True,bg=DARK,size=10); cell.border=brd()
+    ws2.row_dimensions[3].height=22
+    for i,(dom,ap) in enumerate(sorted(por_sem.items())):
+        er=4+i; rb=WHITE if i%2==0 else ALT
+        lucro_s=sum(lucro_aposta(a) for a in ap)
+        stake_s=sum(float(a["stake"]) for a in ap)
+        g_s=sum(1 for a in ap if a["resultado"]=="ganhou")
+        roi_s=lucro_s/stake_s if stake_s else 0
+        lucro_u_s=sum(lucro_aposta(a)/float(a.get("unidade") or 50) for a in ap)
+        sab=dom+timedelta(days=6)
+        num_semana=dom.isocalendar()[1]
+        periodo=f"{dom.strftime('%d/%m')} - {sab.strftime('%d/%m/%Y')}"
+        for col,val in enumerate([f"Semana {num_semana}",periodo,len(ap),g_s,len(ap)-g_s,stake_s,lucro_s,round(lucro_u_s,2),roi_s],1):
+            cell=ws2.cell(row=er,column=col,value=val); fc="000000"
+            if col in (7,8,9): fc=cor(val)
+            cell.font=Font(name="Arial",size=10,color=fc)
+            cell.alignment=Alignment(horizontal="left" if col==2 else "center",vertical="center")
+            cell.fill=PatternFill("solid",start_color=rb); cell.border=brd()
+            if col in (6,7): cell.number_format="#,##0.00"
+            if col==8: cell.number_format="+0.00;-0.00;0.00"
+            if col==9: cell.number_format="+0.0%;-0.0%;0.0%"
+        ws2.row_dimensions[er].height=18
+    for i,w in enumerate([12,22,10,10,10,14,14,14,10],1): ws2.column_dimensions[get_column_letter(i)].width=w
+
+    # ── ABA 6: POR MÊS ──
+    from collections import defaultdict as _dd2
+    NOMES_MES_XL = ["","Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"]
+    por_mes_xl = _dd2(list)
+    for a in df_res:
+        d = a["data"] if hasattr(a["data"],"strftime") else __import__("datetime").datetime.strptime(str(a["data"])[:10],"%Y-%m-%d")
+        por_mes_xl[d.strftime("%Y-%m")].append(a)
+
+    wm = wb.create_sheet("Por Mes")
+    wm.merge_cells("A1:I1"); wm["A1"] = "POR MÊS"
+    est(wm["A1"],bold=True,bg=DARK,size=14); wm.row_dimensions[1].height=34; wm.row_dimensions[2].height=8
+    for c,h in enumerate(["Mês","Apostas","Ganhou","Perdeu","Stake","Lucro R$","Lucro Units","ROI","Win Rate"],1):
+        cell=wm.cell(row=3,column=c,value=h); est(cell,bold=True,bg=DARK,size=10); cell.border=brd()
+    wm.row_dimensions[3].height=22
+
+    acum_m = 0
+    for i,chave in enumerate(sorted(por_mes_xl.keys())):
+        ap_m = por_mes_xl[chave]
+        ano_m,mes_m = int(chave[:4]),int(chave[5:])
+        lucro_m  = sum(lucro_aposta(a) for a in ap_m)
+        stake_m  = sum(float(a["stake"]) for a in ap_m)
+        g_m      = sum(1 for a in ap_m if a["resultado"]=="ganhou")
+        roi_m    = lucro_m/stake_m if stake_m else 0
+        wr_m     = g_m/len(ap_m) if ap_m else 0
+        # Lucro em unidades: cada aposta usa a unidade registrada nela
+        lucro_u_m = sum(lucro_aposta(a)/float(a.get("unidade") or 50) for a in ap_m)
+        acum_m  += lucro_m
+        er=4+i; rb=WHITE if i%2==0 else ALT
+        for col,val in enumerate([f"{NOMES_MES_XL[mes_m]}/{ano_m}",len(ap_m),g_m,len(ap_m)-g_m,stake_m,lucro_m,round(lucro_u_m,2),roi_m,wr_m],1):
+            cell=wm.cell(row=er,column=col,value=val); fc="000000"
+            if col in (6,7,8): fc=cor(val)
+            cell.font=Font(name="Arial",size=10,color=fc)
+            cell.alignment=Alignment(horizontal="left" if col==1 else "center",vertical="center")
+            cell.fill=PatternFill("solid",start_color=rb); cell.border=brd()
+            if col in (5,6): cell.number_format="#,##0.00"
+            if col==7: cell.number_format="+0.00;-0.00;0.00"
+            if col in (8,9): cell.number_format="+0.0%;-0.0%;0.0%"
+        wm.row_dimensions[er].height=18
+
+    # Linha de total
+    tr_m = 4+len(por_mes_xl)
+    for col in range(1,10):
+        cell=wm.cell(row=tr_m,column=col)
+        if col==1: cell.value="TOTAL"
+        elif col==2: cell.value=len(df_res)
+        elif col==3: cell.value=sum(1 for a in df_res if a["resultado"]=="ganhou")
+        elif col==4: cell.value=sum(1 for a in df_res if a["resultado"]=="perdeu")
+        elif col==5: cell.value=round(sum(float(a["stake"]) for a in df_res),2); cell.number_format="#,##0.00"
+        elif col==6: cell.value=round(sum(lucro_aposta(a) for a in df_res),2); cell.number_format="#,##0.00"; fc=cor(cell.value); cell.font=Font(name="Arial",bold=True,size=10,color=fc)
+        elif col==7:
+            total_u=sum(lucro_aposta(a)/float(a.get("unidade") or 50) for a in df_res)
+            cell.value=round(total_u,2); cell.number_format="+0.00;-0.00;0.00"; fc=cor(cell.value); cell.font=Font(name="Arial",bold=True,size=10,color=fc)
+        if col not in (6,7): cell.font=Font(name="Arial",bold=True,size=10,color="FFFFFF")
+        est(cell,bold=True,bg=DARK,size=10); cell.border=brd()
+    wm.row_dimensions[tr_m].height=22
+    for i,w in enumerate([12,10,10,10,14,14,14,10,12],1): wm.column_dimensions[get_column_letter(i)].width=w
+
+    # ── ABA 7: GRAFICO ──
+    wg=wb.create_sheet("Evolucao da Banca")
+    wg["A1"]="Aposta #"; wg["B1"]="Banca Acumulada"
+    for i,(val) in enumerate(banca_acum,2):
+        wg.cell(row=i,column=1,value=i-1); wg.cell(row=i,column=2,value=round(val,2))
+    if len(banca_acum)>=2:
+        chart=LineChart(); chart.title="Evolucao da Banca"; chart.style=10
+        chart.y_axis.title="R$"; chart.x_axis.title="Aposta #"
+        chart.y_axis.numFmt="#,##0.00"; chart.width=26; chart.height=14
+        dr=Reference(wg,min_col=2,min_row=1,max_row=len(banca_acum)+1)
+        cr=Reference(wg,min_col=1,min_row=2,max_row=len(banca_acum)+1)
+        chart.add_data(dr,titles_from_data=True); chart.set_categories(cr)
+        chart.series[0].graphicalProperties.line.solidFill="2563EB"
+        chart.series[0].graphicalProperties.line.width=22000
+        wg.add_chart(chart,"D2")
+
+    # Salvar na memória e enviar
+    buf=io.BytesIO(); wb.save(buf); buf.seek(0)
+    from datetime import datetime as dt2
+    nome_arq=f"dashboard_{dt2.now().strftime('%d%m%Y_%H%M')}.xlsx"
+    await update.message.reply_document(
+        document=InputFile(buf, filename=nome_arq),
+        caption=f"Dashboard gerado! {total} apostas | R$ {lucro_total:.2f} lucro | ROI {roi:+.1%}"
+    )
+
+# ── EXPORTAR CSV ──────────────────────────────────────────────────────────────
+async def exportar_csv(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    apostas   = carregar()
+    total     = len(apostas)
+    pendentes = sum(1 for a in apostas if a["resultado"] == "pendente")
+    import io
+    output = io.StringIO()
+    import csv as csv_mod
+    writer = csv_mod.writer(output, quoting=csv_mod.QUOTE_ALL)
+    writer.writerow(["id","data","horario","descricao","odd","stake","resultado","casa","esporte"])
+    for a in apostas:
+        data = a["data"].strftime("%Y-%m-%d") if hasattr(a["data"],"strftime") else str(a["data"])
+        writer.writerow([a["id"],data,a.get("horario",""),a["descricao"],a["odd"],a["stake"],a["resultado"],a.get("casa",""),a.get("esporte","")])
+    csv_bytes = output.getvalue().encode("utf-8")
+    caption   = f"\U0001f4ca apostas.csv\n{total} apostas | {pendentes} pendentes"
+    await update.message.reply_document(document=InputFile(csv_bytes, filename="apostas.csv"), caption=caption)
+
+# ── SERVIDOR KEEP-ALIVE ───────────────────────────────────────────────────────
+class PingHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
+    def do_HEAD(self):
+        self.send_response(200); self.end_headers()
+    def log_message(self, *args): pass
+
+def iniciar_servidor():
+    port = int(os.environ.get("PORT", 8080))
+    HTTPServer(("0.0.0.0", port), PingHandler).serve_forever()
+
+# ── MAIN ──────────────────────────────────────────────────────────────────────
+def main():
+    inicializar_db()
+    app = Application.builder().token(TOKEN).build()
+
+    BOTOES_MENU = ["📝 Nova aposta","⏳ Ver pendentes","📈 Resultados","✏️ Editar aposta","📊 Gerar Resultados","⚙️ Mudar Unidade"]
+    fallbacks_padrao = [
+        CommandHandler("cancelar", cancelar),
+        MessageHandler(filters.Regex(f"^{CANCELAR_BTN}$"), cancelar),
+        MessageHandler(filters.Regex("^(" + "|".join(re.escape(b) for b in BOTOES_MENU) + ")$"), cancelar),
+    ]
+
+    conv_nova = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^📝 Nova aposta$"), nova_aposta_inicio)],
+        states={
+            DATA:      [MessageHandler(filters.TEXT & ~filters.COMMAND, receber_data)],
+            HORARIO:   [MessageHandler(filters.TEXT & ~filters.COMMAND, receber_horario)],
+            DESCRICAO: [MessageHandler(filters.TEXT & ~filters.COMMAND, receber_descricao)],
+            ODD:       [MessageHandler(filters.TEXT & ~filters.COMMAND, receber_odd)],
+            STAKE:     [MessageHandler(filters.TEXT & ~filters.COMMAND, receber_stake)],
+            ESPORTE:   [MessageHandler(filters.TEXT & ~filters.COMMAND, receber_esporte)],
+            CASA:      [MessageHandler(filters.TEXT & ~filters.COMMAND, receber_casa)],
+        },
+        fallbacks=fallbacks_padrao,
+    )
+
+    conv_editar = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^✏️ Editar aposta$"), editar_inicio)],
+        states={
+            EDITAR_PAGINA: [MessageHandler(filters.TEXT & ~filters.COMMAND, editar_navegar)],
+            EDITAR_CAMPO: [MessageHandler(filters.TEXT & ~filters.COMMAND, editar_receber_campo)],
+            EDITAR_VALOR: [MessageHandler(filters.TEXT & ~filters.COMMAND, editar_receber_valor)],
+            EDITAR_CASA:  [MessageHandler(filters.TEXT & ~filters.COMMAND, editar_receber_casa)],
+        },
+        fallbacks=fallbacks_padrao,
+    )
+
+    conv_unidade = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^⚙️ Mudar Unidade$"), mudar_unidade_inicio)],
+        states={
+            MUDAR_UNIDADE_VALOR: [MessageHandler(filters.TEXT & ~filters.COMMAND, mudar_unidade_receber)],
+        },
+        fallbacks=fallbacks_padrao,
+    )
+
+    conv_resultados = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^📈 Resultados$"), resultados)],
+        states={
+            RESULTADOS_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, resultados_resposta)],
+        },
+        fallbacks=fallbacks_padrao,
+    )
+
+    conv_gerar = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^📊 Gerar Resultados$"), gerar_menu)],
+        states={
+            GERAR_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, gerar_resposta)],
+        },
+        fallbacks=fallbacks_padrao,
+    )
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("exportar", exportar_csv))
+    app.add_handler(CommandHandler("migrar_casas", cmd_migrar_casas))
+    app.add_handler(conv_nova)
+    app.add_handler(conv_editar)
+    app.add_handler(conv_unidade)
+    app.add_handler(conv_resultados)
+    app.add_handler(conv_gerar)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_botao))
+
+    threading.Thread(target=iniciar_servidor, daemon=True).start()
+    print("🤖 Bot rodando! Abra o Telegram e mande /start")
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()

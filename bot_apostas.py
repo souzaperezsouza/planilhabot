@@ -744,8 +744,8 @@ async def resultados(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     stake_curso  = sum(float(a["stake"]) for a in pendentes_ap)
     possivel_ganho = sum(float(a["stake"]) * (float(a["odd"]) - 1) for a in pendentes_ap)
     unidade_atual = get_unidade_atual()
-    # Lucro em unidades: sempre com base na unidade ATUAL, para bater com R$/unidade
-    lucro_unidades = lucro_total / unidade_atual
+    # Lucro em unidades: usa a unidade registrada em cada aposta (histórico fiel)
+    lucro_unidades = sum(lucro_aposta(a) / float(a.get("unidade") or 50) for a in res)
 
     agora = datetime.now()
     hoje_date = agora.date()
@@ -756,7 +756,7 @@ async def resultados(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 datetime.strptime(str(a["data"])[:10], "%Y-%m-%d").date()
                ).replace(day=1) == hoje_date.replace(day=1)]
     lucro_mes   = sum(lucro_aposta(a) for a in res_mes)
-    lucro_mes_u = lucro_mes / unidade_atual
+    lucro_mes_u = sum(lucro_aposta(a) / float(a.get("unidade") or 50) for a in res_mes)
     sinal_m = "+" if lucro_mes >= 0 else ""
     emoji_m = "🟢" if lucro_mes >= 0 else "🔴"
 
@@ -768,7 +768,7 @@ async def resultados(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                    datetime.strptime(str(a["data"])[:10], "%Y-%m-%d").date()
                   ) >= inicio_semana_date]
     lucro_semana   = sum(lucro_aposta(a) for a in res_semana)
-    lucro_semana_u = lucro_semana / unidade_atual
+    lucro_semana_u = sum(lucro_aposta(a) / float(a.get("unidade") or 50) for a in res_semana)
     sinal_s = "+" if lucro_semana >= 0 else ""
     emoji_s = "🟢" if lucro_semana >= 0 else "🔴"
 
@@ -822,7 +822,6 @@ async def resultados_por_mes(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         chave = data_obj.strftime("%Y-%m")
         por_mes[chave].append(a)
 
-    unidade_atual = get_unidade_atual()
     NOMES_MES = ["","Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"]
     linhas = ["📅 *Resultados por Mês:*\n"]
     acum = 0
@@ -836,8 +835,8 @@ async def resultados_por_mes(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         acum   += lucro_m
         emoji_m = "🟢" if lucro_m >= 0 else "🔴"
         sinal_m = "+" if lucro_m >= 0 else ""
-        # Lucro em unidades: sempre com base na unidade ATUAL
-        lucro_u = lucro_m / unidade_atual
+        # Lucro em unidades usando a unidade de cada aposta individualmente
+        lucro_u = sum(lucro_aposta(a) / float(a.get("unidade") or 50) for a in ap)
         linhas.append(
             f"{emoji_m} *{NOMES_MES[mes]}/{ano}*\n"
             f"  {len(ap)} ap | {g_m}V/{len(ap)-g_m}D | ROI {roi_m:+.1%}\n"
@@ -868,7 +867,7 @@ async def resultados_por_mes_especifico(update: Update, ctx: ContextTypes.DEFAUL
             stake_m   = sum(float(a["stake"]) for a in do_mes)
             g_m       = sum(1 for a in do_mes if a["resultado"] == "ganhou")
             roi_m     = lucro_m / stake_m if stake_m else 0
-            lucro_u_m = lucro_m / unidade_atual
+            lucro_u_m = sum(lucro_aposta(a) / float(a.get("unidade") or 50) for a in do_mes)
             emoji_m   = "🟢" if lucro_m >= 0 else "🔴"
             sinal_m   = "+" if lucro_m >= 0 else ""
             await update.message.reply_text(
@@ -957,9 +956,8 @@ async def resultados_dia(update: Update, ctx: ContextTypes.DEFAULT_TYPE, raw: st
             f"Nenhuma aposta resolvida em {data_obj.strftime('%d/%m/%Y')}.",
             reply_markup=teclado_resultados())
         return True
-    unidade_atual = get_unidade_atual()
     lucro_dia   = sum(lucro_aposta(a) for a in do_dia)
-    lucro_dia_u = lucro_dia / unidade_atual
+    lucro_dia_u = sum(lucro_aposta(a) / float(a.get("unidade") or 50) for a in do_dia)
     g  = sum(1 for a in do_dia if a["resultado"] == "ganhou")
     p  = sum(1 for a in do_dia if a["resultado"] == "perdeu")
     co = sum(1 for a in do_dia if eh_cashout(a))
@@ -973,7 +971,8 @@ async def resultados_dia(update: Update, ctx: ContextTypes.DEFAULT_TYPE, raw: st
     emojis_res = {"ganhou":"✅","perdeu":"❌"}
     for a in do_dia:
         l   = lucro_aposta(a)
-        l_u = l / unidade_atual
+        u_a = float(a.get("unidade") or 50)
+        l_u = l / u_a
         s   = "+" if l >= 0 else ""
         if eh_cashout(a):
             cv = float(a.get("cashout_valor") or 0)
@@ -1004,12 +1003,11 @@ async def resultados_por_casa_detalhe(update: Update, ctx: ContextTypes.DEFAULT_
         )
         return
 
-    unidade_atual = get_unidade_atual()
     lucro_c   = sum(lucro_aposta(a) for a in do_casa)
     stake_c   = sum(float(a["stake"]) for a in do_casa)
     g_c       = sum(1 for a in do_casa if a["resultado"] == "ganhou")
     roi_c     = lucro_c / stake_c if stake_c else 0
-    lucro_u_c = lucro_c / unidade_atual
+    lucro_u_c = sum(lucro_aposta(a) / float(a.get("unidade") or 50) for a in do_casa)
     emoji_c   = "🟢" if lucro_c >= 0 else "🔴"
     sinal_c   = "+" if lucro_c >= 0 else ""
 
@@ -1022,7 +1020,8 @@ async def resultados_por_casa_detalhe(update: Update, ctx: ContextTypes.DEFAULT_
     emojis_res = {"ganhou":"✅","perdeu":"❌","void":"↩️","pendente":"⏳"}
     for a in sorted(do_casa, key=lambda x: (str(x["data"]), x.get("horario") or "")):
         l   = lucro_aposta(a)
-        l_u = l / unidade_atual
+        u_a = float(a.get("unidade") or 50)
+        l_u = l / u_a
         s   = "+" if l >= 0 else ""
         data_fmt = a["data"].strftime("%d/%m/%Y") if hasattr(a["data"],"strftime") else str(a["data"])[:10]
         res_emoji = "💸" if eh_cashout(a) else emojis_res.get(a["resultado"], "")
@@ -1577,7 +1576,7 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
     ws.row_dimensions[2].height = 8
 
     unidade_dash = get_unidade_atual()
-    lucro_units_dash = lucro_total / unidade_dash
+    lucro_units_dash = sum(lucro_aposta(a) / float(a.get("unidade") or 50) for a in df_res)
     stake_curso = sum(float(a["stake"]) for a in apostas if a["resultado"]=="pendente")
     cards = [
         ("Total",         str(total),                    DARK),
@@ -1612,7 +1611,8 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
         lucro_a=lucro_u_a=banca_a=prog_a=""
         if res in ("ganhou","perdeu") or eh_cashout(a):
             lucro_a=lucro_aposta(a)
-            lucro_u_a=round(lucro_a/unidade_dash,2)
+            unid_a=float(a.get("unidade") or 50)
+            lucro_u_a=round(lucro_a/unid_a,2) if unid_a else ""
             acum2+=lucro_a; banca_a=round(acum2,2); prog_a=round(acum2/BANCA,4)
         res_d={"ganhou":"Green","perdeu":"Red","void":"Void","pendente":"Pendente"}.get(res,res)
         if eh_cashout(a): res_d="Cashout"
@@ -1742,7 +1742,8 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
 
     def lb_data_row(row, aposta, idx):
         l = lucro_aposta(aposta)
-        lucro_u = round(l / unidade_dash, 2)
+        unid = float(aposta.get("unidade") or 50)
+        lucro_u = round(l / unid, 2) if unid else 0
         data_fmt = aposta["data"].strftime("%d/%m/%Y") if hasattr(aposta["data"],"strftime") else str(aposta["data"])[:10]
         vals = [aposta["id"], data_fmt, aposta.get("horario",""), aposta["descricao"],
                 float(aposta["odd"]), float(aposta["stake"]),
@@ -2082,7 +2083,7 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
         if casa not in casas: casas[casa]={"ap":0,"g":0,"stake":0.0,"lucro":0.0,"lucro_u":0.0}
         c=casas[casa]; c["ap"]+=1; c["stake"]+=float(a["stake"])
         c["lucro"]+=lucro_aposta(a)
-        c["lucro_u"]+=lucro_aposta(a)/unidade_dash
+        c["lucro_u"]+=lucro_aposta(a)/float(a.get("unidade") or 50)
         if a["resultado"]=="ganhou": c["g"]+=1
     wc=wb.create_sheet("Por Casa")
     wc.merge_cells("A1:I1"); wc["A1"]="POR CASA"
@@ -2113,7 +2114,7 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
         if esp not in esportes: esportes[esp]={"ap":0,"g":0,"stake":0.0,"lucro":0.0,"lucro_u":0.0}
         e=esportes[esp]; e["ap"]+=1; e["stake"]+=float(a["stake"])
         e["lucro"]+=lucro_aposta(a)
-        e["lucro_u"]+=lucro_aposta(a)/unidade_dash
+        e["lucro_u"]+=lucro_aposta(a)/float(a.get("unidade") or 50)
         if a["resultado"]=="ganhou": e["g"]+=1
     we=wb.create_sheet("Por Esporte")
     we.merge_cells("A1:I1"); we["A1"]="POR ESPORTE"
@@ -2165,7 +2166,7 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
         stake_s=sum(float(a["stake"]) for a in ap)
         g_s=sum(1 for a in ap if a["resultado"]=="ganhou")
         roi_s=lucro_s/stake_s if stake_s else 0
-        lucro_u_s=lucro_s/unidade_dash
+        lucro_u_s=sum(lucro_aposta(a)/float(a.get("unidade") or 50) for a in ap)
         sab=dom+timedelta(days=6)
         num_semana=dom.isocalendar()[1]
         periodo=f"{dom.strftime('%d/%m')} - {sab.strftime('%d/%m/%Y')}"
@@ -2205,8 +2206,8 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
         g_m      = sum(1 for a in ap_m if a["resultado"]=="ganhou")
         roi_m    = lucro_m/stake_m if stake_m else 0
         wr_m     = g_m/len(ap_m) if ap_m else 0
-        # Lucro em unidades: sempre com base na unidade ATUAL
-        lucro_u_m = lucro_m/unidade_dash
+        # Lucro em unidades: cada aposta usa a unidade registrada nela
+        lucro_u_m = sum(lucro_aposta(a)/float(a.get("unidade") or 50) for a in ap_m)
         acum_m  += lucro_m
         er=4+i; rb=WHITE if i%2==0 else ALT
         for col,val in enumerate([f"{NOMES_MES_XL[mes_m]}/{ano_m}",len(ap_m),g_m,len(ap_m)-g_m,stake_m,lucro_m,round(lucro_u_m,2),roi_m,wr_m],1):
@@ -2231,7 +2232,7 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
         elif col==5: cell.value=round(sum(float(a["stake"]) for a in df_res),2); cell.number_format="#,##0.00"
         elif col==6: cell.value=round(sum(lucro_aposta(a) for a in df_res),2); cell.number_format="#,##0.00"; fc=cor(cell.value); cell.font=Font(name="Arial",bold=True,size=10,color=fc)
         elif col==7:
-            total_u=lucro_total/unidade_dash
+            total_u=sum(lucro_aposta(a)/float(a.get("unidade") or 50) for a in df_res)
             cell.value=round(total_u,2); cell.number_format="+0.00;-0.00;0.00"; fc=cor(cell.value); cell.font=Font(name="Arial",bold=True,size=10,color=fc)
         if col not in (6,7): cell.font=Font(name="Arial",bold=True,size=10,color="FFFFFF")
         est(cell,bold=True,bg=DARK,size=10); cell.border=brd()

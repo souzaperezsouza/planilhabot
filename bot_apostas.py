@@ -1604,8 +1604,10 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
         cell=ws.cell(row=HDR,column=c,value=h); est(cell,bold=True,bg=DARK,size=10); cell.border=brd()
 
     acum2=0
+    id_to_row={}
     for i,a in enumerate(apostas_ord):
         er=DAT+i; ws.row_dimensions[er].height=18
+        id_to_row[a["id"]]=er
         rb=WHITE if i%2==0 else ALT
         res=a["resultado"]
         lucro_a=lucro_u_a=banca_a=prog_a=""
@@ -1663,15 +1665,23 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
     maior_perda_e    = min((lucro_aposta(a) for a in apostas_perdidas), default=0)
 
     seq_verde_max = seq_verm_max = seq_verde_cur = seq_verm_cur = 0
+    seq_verde_ini_id = seq_verde_fim_id = seq_verm_ini_id = seq_verm_fim_id = None
+    _cur_verde_ini = _cur_verm_ini = None
     for a in df_res:
         if a["resultado"] == "ganhou":
+            if seq_verde_cur == 0: _cur_verde_ini = a["id"]
             seq_verde_cur += 1; seq_verm_cur = 0
+            if seq_verde_cur > seq_verde_max:
+                seq_verde_max = seq_verde_cur
+                seq_verde_ini_id, seq_verde_fim_id = _cur_verde_ini, a["id"]
         elif a["resultado"] == "perdeu":
+            if seq_verm_cur == 0: _cur_verm_ini = a["id"]
             seq_verm_cur += 1; seq_verde_cur = 0
+            if seq_verm_cur > seq_verm_max:
+                seq_verm_max = seq_verm_cur
+                seq_verm_ini_id, seq_verm_fim_id = _cur_verm_ini, a["id"]
         else:
             seq_verde_cur = seq_verm_cur = 0
-        seq_verde_max = max(seq_verde_max, seq_verde_cur)
-        seq_verm_max  = max(seq_verm_max,  seq_verm_cur)
 
     # Por Unidade
     por_unidade_e = {}
@@ -1721,6 +1731,22 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
     ]
     for i,(label,valor,fmt,cor_v) in enumerate(metricas):
         stat_row(wst, 3+i, label, valor, fmt, cor_v)
+
+    def _seq_id_box(row, ini_id, fim_id):
+        wst.merge_cells(start_row=row, start_column=3, end_row=row, end_column=4)
+        cell = wst.cell(row=row, column=3)
+        cell.value = f"IDs: #{ini_id} → #{fim_id}" if ini_id is not None else "—"
+        cell.font = Font(name="Arial", size=9, italic=True, color="1E3A5F")
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        cell.fill = PatternFill("solid", start_color="EFF6FF")
+        cell.border = brd()
+        if ini_id in id_to_row:
+            cell.hyperlink = f"#Dashboard!A{id_to_row[ini_id]}"
+
+    _row_greens = 3 + metricas.index(next(m for m in metricas if m[0]=="Maior Sequência de Greens"))
+    _row_reds   = 3 + metricas.index(next(m for m in metricas if m[0]=="Maior Sequência de Reds"))
+    _seq_id_box(_row_greens, seq_verde_ini_id, seq_verde_fim_id)
+    _seq_id_box(_row_reds,   seq_verm_ini_id,  seq_verm_fim_id)
 
     # ── LEADERBOARD (colunas D em diante) ──
     LB_COL = 5
@@ -1790,6 +1816,11 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
     try: melhor_dia_fmt = _dt_lb.datetime.strptime(melhor_dia_k,"%Y-%m-%d").strftime("%d/%m/%Y")
     except: melhor_dia_fmt = melhor_dia_k or "—"
 
+    pior_dia_k = min(por_dia_lb, key=lambda k: sum(lucro_aposta(x) for x in por_dia_lb[k])) if por_dia_lb else None
+    pior_dia_lucro = round(sum(lucro_aposta(x) for x in por_dia_lb[pior_dia_k]),2) if pior_dia_k else 0
+    try: pior_dia_fmt = _dt_lb.datetime.strptime(pior_dia_k,"%Y-%m-%d").strftime("%d/%m/%Y")
+    except: pior_dia_fmt = pior_dia_k or "—"
+
     def _dom_lb(dt):
         if not isinstance(dt, _dt_lb.datetime):
             dt = _dt_lb.datetime(dt.year, dt.month, dt.day) if isinstance(dt, _dt_lb.date) else _dt_lb.datetime.strptime(str(dt)[:10],"%Y-%m-%d")
@@ -1825,9 +1856,11 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
 
     records = [
         ("Melhor Dia",    melhor_dia_fmt, melhor_dia_lucro),
+        ("Pior Dia",      pior_dia_fmt,   pior_dia_lucro),
         ("Melhor Semana", melhor_sem_fmt, melhor_sem_lucro),
         ("Melhor Mês",    melhor_mes_fmt, melhor_mes_lucro),
     ]
+    _dia_key_por_label = {"Melhor Dia": melhor_dia_k, "Pior Dia": pior_dia_k}
     for i,(label_r, periodo_r, lucro_r) in enumerate(records):
         rb = WHITE if i%2==0 else ALT
         for j, val in enumerate([label_r, periodo_r, round(lucro_r, 2)]):
@@ -1837,6 +1870,14 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
             cell.fill = PatternFill("solid", start_color=rb); cell.border = brd()
             cell.alignment = Alignment(horizontal="left" if j<2 else "center", vertical="center")
             if j==2: cell.number_format = "#,##0.00"
+            if j==0 and label_r in _dia_key_por_label:
+                dia_k = _dia_key_por_label[label_r]
+                bets_do_dia = por_dia_lb.get(dia_k) if dia_k else None
+                if bets_do_dia:
+                    primeiro_id = bets_do_dia[0]["id"]
+                    if primeiro_id in id_to_row:
+                        cell.hyperlink = f"#Dashboard!A{id_to_row[primeiro_id]}"
+                        cell.font = Font(name="Arial", size=10, bold=True, color="0563C1", underline="single")
         for j in range(3, N_LB):
             cell = wst.cell(row=lb_r, column=LB_COL+j)
             cell.fill = PatternFill("solid", start_color=rb); cell.border = brd()

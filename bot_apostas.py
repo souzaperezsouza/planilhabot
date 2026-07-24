@@ -2296,7 +2296,15 @@ def iniciar_servidor():
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 def main():
     inicializar_db()
-    app = Application.builder().token(TOKEN).build()
+    app = (
+        Application.builder()
+        .token(TOKEN)
+        .connect_timeout(30)
+        .read_timeout(60)
+        .write_timeout(60)
+        .pool_timeout(30)
+        .build()
+    )
 
     BOTOES_MENU = ["📝 Nova aposta","⏳ Ver pendentes","📈 Resultados","✏️ Editar aposta","📊 Gerar Resultados","⚙️ Mudar Unidade"]
     fallbacks_padrao = [

@@ -1958,6 +1958,15 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
     try: pior_dia_fmt = _dt_lb.datetime.strptime(pior_dia_k,"%Y-%m-%d").strftime("%d/%m/%Y")
     except: pior_dia_fmt = pior_dia_k or "—"
 
+    melhor_media_dia_k = max(
+        por_dia_lb, key=lambda k: sum(lucro_aposta(x) for x in por_dia_lb[k]) / len(por_dia_lb[k])
+    ) if por_dia_lb else None
+    melhor_media_dia_val = round(
+        sum(lucro_aposta(x) for x in por_dia_lb[melhor_media_dia_k]) / len(por_dia_lb[melhor_media_dia_k]), 2
+    ) if melhor_media_dia_k else 0
+    try: melhor_media_dia_fmt = _dt_lb.datetime.strptime(melhor_media_dia_k,"%Y-%m-%d").strftime("%d/%m/%Y")
+    except: melhor_media_dia_fmt = melhor_media_dia_k or "—"
+
     def _dom_lb(dt):
         if not isinstance(dt, _dt_lb.datetime):
             dt = _dt_lb.datetime(dt.year, dt.month, dt.day) if isinstance(dt, _dt_lb.date) else _dt_lb.datetime.strptime(str(dt)[:10],"%Y-%m-%d")
@@ -1994,10 +2003,15 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
     records = [
         ("Melhor Dia",    melhor_dia_fmt, melhor_dia_lucro),
         ("Pior Dia",      pior_dia_fmt,   pior_dia_lucro),
+        ("Melhor Média/Aposta (Dia)", melhor_media_dia_fmt, melhor_media_dia_val),
         ("Melhor Semana", melhor_sem_fmt, melhor_sem_lucro),
         ("Melhor Mês",    melhor_mes_fmt, melhor_mes_lucro),
     ]
-    _dia_key_por_label = {"Melhor Dia": melhor_dia_k, "Pior Dia": pior_dia_k}
+    _dia_key_por_label = {
+        "Melhor Dia": melhor_dia_k,
+        "Pior Dia": pior_dia_k,
+        "Melhor Média/Aposta (Dia)": melhor_media_dia_k,
+    }
     for i,(label_r, periodo_r, lucro_r) in enumerate(records):
         rb = WHITE if i%2==0 else ALT
         for j, val in enumerate([label_r, periodo_r, round(lucro_r, 2)]):

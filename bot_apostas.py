@@ -154,6 +154,7 @@ EDITAR_PAGINA                                       = 13
 MUDAR_UNIDADE_VALOR                                 = 14
 RESULTADOS_MENU                                     = 15
 GERAR_MENU                                          = 16
+CONFIG_MENU, GASTOS_MENU, GASTO_DESCRICAO, GASTO_VALOR = range(17, 21)
 
 CANCELAR_BTN = "❌ Cancelar"
 VOLTAR_BTN   = "⬅️ Voltar"
@@ -163,7 +164,7 @@ def teclado_menu():
     return ReplyKeyboardMarkup([
         ["📝 Nova aposta",   "⏳ Ver pendentes"],
         ["📈 Resultados",    "✏️ Editar aposta"],
-        ["📊 Gerar Resultados", "⚙️ Mudar Unidade"],
+        ["📊 Gerar Resultados", "⚙️ Configurações"],
     ], resize_keyboard=True)
 
 def teclado_cancelar():
@@ -181,6 +182,18 @@ def teclado_resultados():
 def teclado_gerar():
     return ReplyKeyboardMarkup([
         ["📊 Gerar Dashboard", "📂 Gerar Dados"],
+        ["🔙 Voltar"],
+    ], resize_keyboard=True)
+
+def teclado_config():
+    return ReplyKeyboardMarkup([
+        ["💲 Mudar Unidade", "💸 Gastos"],
+        ["🔙 Voltar"],
+    ], resize_keyboard=True)
+
+def teclado_gastos():
+    return ReplyKeyboardMarkup([
+        ["➕ Novo Gasto", "📋 Ver Gastos"],
         ["🔙 Voltar"],
     ], resize_keyboard=True)
 
@@ -219,6 +232,14 @@ def inicializar_db():
             cur.execute("""
                 INSERT INTO configuracoes (chave, valor) VALUES ('unidade_atual', '50')
                 ON CONFLICT (chave) DO NOTHING
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS gastos (
+                    id        SERIAL PRIMARY KEY,
+                    data      DATE NOT NULL,
+                    descricao TEXT NOT NULL,
+                    valor     NUMERIC(10,2) NOT NULL
+                )
             """)
         conn.commit()
     # Normaliza casas com nomes antigos/errados automaticamente a cada deploy
@@ -308,6 +329,29 @@ def set_unidade_atual(valor):
                 ON CONFLICT (chave) DO UPDATE SET valor = EXCLUDED.valor
             """, (str(valor),))
         conn.commit()
+
+def inserir_gasto(data, descricao, valor):
+    with conectar() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO gastos (data, descricao, valor) VALUES (%s,%s,%s) RETURNING id
+            """, (data, descricao, valor))
+            new_id = cur.fetchone()[0]
+        conn.commit()
+    return new_id
+
+def listar_gastos():
+    with conectar() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT * FROM gastos ORDER BY data ASC, id ASC")
+            return [dict(r) for r in cur.fetchall()]
+
+def total_gastos():
+    with conectar() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COALESCE(SUM(valor),0) FROM gastos")
+            row = cur.fetchone()
+    return float(row[0]) if row else 0.0
 
 # ── HELPERS ───────────────────────────────────────────────────────────────────
 def normalizar_casa(s):
@@ -466,7 +510,6 @@ async def menu_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text
 
     if txt == "⏳ Ver pendentes":    return await ver_pendentes(update, ctx)
-    if txt == "⚙️ Mudar Unidade":    return await mudar_unidade_inicio(update, ctx)
 
 # ── NOVA APOSTA ───────────────────────────────────────────────────────────────
 async def nova_aposta_inicio(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -1348,6 +1391,83 @@ async def mudar_unidade_receber(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
     return await voltar_menu(update, ctx)
 
+# ── CONFIGURAÇÕES ─────────────────────────────────────────────────────────────
+async def config_inicio(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "⚙️ *Configurações*\n\nO que deseja ajustar?",
+        reply_markup=teclado_config(), parse_mode="Markdown"
+    )
+    return CONFIG_MENU
+
+async def config_resposta(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    txt = update.message.text
+    if txt == "🔙 Voltar":
+        return await voltar_menu(update, ctx)
+    if txt == "💲 Mudar Unidade":
+        return await mudar_unidade_inicio(update, ctx)
+    if txt == "💸 Gastos":
+        return await gastos_menu(update, ctx)
+    await update.message.reply_text("❓ Use os botões abaixo.", reply_markup=teclado_config())
+    return CONFIG_MENU
+
+async def gastos_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    total = total_gastos()
+    await update.message.reply_text(
+        f"💸 *Gastos*\n\nTotal registrado: *R$ {total:.2f}*\n\n"
+        f"Isso entra no cálculo de *Lucro Real* na planilha "
+        f"(Lucro das apostas − Gastos). Não afeta ROI, Win Rate nem Lucro Units.",
+        reply_markup=teclado_gastos(), parse_mode="Markdown"
+    )
+    return GASTOS_MENU
+
+async def gastos_resposta(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    txt = update.message.text
+    if txt == "🔙 Voltar":
+        return await config_inicio(update, ctx)
+    if txt == "➕ Novo Gasto":
+        await update.message.reply_text(
+            "📝 Descrição do gasto (ex: Assinatura Grupo VIP):",
+            reply_markup=teclado_cancelar()
+        )
+        return GASTO_DESCRICAO
+    if txt == "📋 Ver Gastos":
+        gastos = listar_gastos()
+        if not gastos:
+            await update.message.reply_text("Nenhum gasto registrado ainda.", reply_markup=teclado_gastos())
+        else:
+            linhas = [
+                f"#{g['id']} | {g['data'].strftime('%d/%m/%Y')} | {g['descricao']} | R$ {float(g['valor']):.2f}"
+                for g in gastos
+            ]
+            await enviar_paginado(update, linhas, reply_markup=teclado_gastos())
+        return GASTOS_MENU
+    await update.message.reply_text("❓ Use os botões abaixo.", reply_markup=teclado_gastos())
+    return GASTOS_MENU
+
+async def receber_gasto_descricao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    txt = update.message.text.strip()
+    if txt == CANCELAR_BTN: return await cancelar(update, ctx)
+    ctx.user_data["gasto_descricao"] = txt
+    await update.message.reply_text("💰 Valor do gasto em R$:", reply_markup=teclado_cancelar())
+    return GASTO_VALOR
+
+async def receber_gasto_valor(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    raw = update.message.text.strip()
+    if raw == CANCELAR_BTN: return await cancelar(update, ctx)
+    try:
+        valor = float(raw.replace(",", "."))
+        if valor <= 0: raise ValueError
+    except ValueError:
+        await update.message.reply_text("❌ Digite um valor válido maior que zero:")
+        return GASTO_VALOR
+    desc = ctx.user_data.pop("gasto_descricao", "")
+    inserir_gasto(datetime.now().date(), desc, valor)
+    await update.message.reply_text(
+        f"✅ *Gasto registrado!*\n\n{desc} — R$ {valor:.2f}",
+        parse_mode="Markdown"
+    )
+    return await gastos_menu(update, ctx)
+
 # ── GERAR MENU ────────────────────────────────────────────────────────────────
 async def gerar_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -1655,7 +1775,9 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
     apostas_ganhas   = [a for a in df_res if a["resultado"] == "ganhou"]
     apostas_perdidas = [a for a in df_res if a["resultado"] == "perdeu"]
     capital_em_jogo  = sum(float(a["stake"]) for a in apostas if a["resultado"] == "pendente")
-    capital_atual    = BANCA + lucro_total - capital_em_jogo
+    total_gastos_e   = total_gastos()
+    lucro_real_e     = lucro_total - total_gastos_e
+    capital_atual    = BANCA + lucro_total - capital_em_jogo - total_gastos_e
     maior_odd_acert  = max((float(a["odd"]) for a in apostas_ganhas), default=0)
     maior_stake_val  = max((float(a["stake"]) for a in df_res), default=0)
     stake_total_e    = sum(float(a["stake"]) for a in df_res)
@@ -1719,6 +1841,8 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
 
     metricas = [
         ("Capital Atual (R$)",         round(capital_atual, 2),      "#,##0.00", True),
+        ("Despesas Totais (R$)",       round(total_gastos_e, 2),     "#,##0.00", False),
+        ("Lucro Real (R$)",            round(lucro_real_e, 2),       "#,##0.00", True),
         ("Stake Investida Total (R$)",  round(stake_total_e, 2),      "#,##0.00", False),
         ("Stake Média (R$)",            round(stake_media_e, 2),      "#,##0.00", False),
         ("Odd Média",                   round(odd_media_e, 3),        "0.000",    False),
@@ -2296,6 +2420,34 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
         chart.series[0].graphicalProperties.line.width=22000
         wg.add_chart(chart,"D2")
 
+    # ── ABA: GASTOS ──
+    gastos_lista = listar_gastos()
+    wgas = wb.create_sheet("Gastos")
+    wgas.merge_cells("A1:C1"); wgas["A1"] = "GASTOS / INVESTIMENTOS"
+    est(wgas["A1"], bold=True, bg=DARK, size=14)
+    wgas.row_dimensions[1].height = 30; wgas.row_dimensions[2].height = 6
+    for c, h in enumerate(["Data", "Descrição", "Valor (R$)"], 1):
+        cell = wgas.cell(row=3, column=c, value=h)
+        est(cell, bold=True, bg=DARK, size=10); cell.border = brd()
+    for i, g in enumerate(gastos_lista):
+        r = 4 + i
+        rb = WHITE if i % 2 == 0 else ALT
+        data_g = g["data"].strftime("%d/%m/%Y") if hasattr(g["data"], "strftime") else str(g["data"])[:10]
+        for c, val in enumerate([data_g, g["descricao"], float(g["valor"])], 1):
+            cell = wgas.cell(row=r, column=c, value=val)
+            cell.font = Font(name="Arial", size=10)
+            cell.alignment = Alignment(horizontal="left" if c == 2 else "center", vertical="center")
+            cell.fill = PatternFill("solid", start_color=rb); cell.border = brd()
+            if c == 3: cell.number_format = "#,##0.00"
+    tr_g = 4 + len(gastos_lista)
+    tcell = wgas.cell(row=tr_g, column=2, value="TOTAL")
+    vcell = wgas.cell(row=tr_g, column=3, value=round(total_gastos_e, 2)); vcell.number_format = "#,##0.00"
+    for cell in (tcell, vcell):
+        est(cell, bold=True, bg=DARK, size=10); cell.border = brd()
+    wgas.column_dimensions["A"].width = 14
+    wgas.column_dimensions["B"].width = 45
+    wgas.column_dimensions["C"].width = 16
+
     # Salvar na memória e enviar
     buf=io.BytesIO(); wb.save(buf); buf.seek(0)
     from datetime import datetime as dt2
@@ -2347,7 +2499,7 @@ def main():
         .build()
     )
 
-    BOTOES_MENU = ["📝 Nova aposta","⏳ Ver pendentes","📈 Resultados","✏️ Editar aposta","📊 Gerar Resultados","⚙️ Mudar Unidade"]
+    BOTOES_MENU = ["📝 Nova aposta","⏳ Ver pendentes","📈 Resultados","✏️ Editar aposta","📊 Gerar Resultados","⚙️ Configurações"]
     fallbacks_padrao = [
         CommandHandler("cancelar", cancelar),
         MessageHandler(filters.Regex(f"^{CANCELAR_BTN}$"), cancelar),
@@ -2379,10 +2531,14 @@ def main():
         fallbacks=fallbacks_padrao,
     )
 
-    conv_unidade = ConversationHandler(
-        entry_points=[MessageHandler(filters.Regex("^⚙️ Mudar Unidade$"), mudar_unidade_inicio)],
+    conv_config = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^⚙️ Configurações$"), config_inicio)],
         states={
-            MUDAR_UNIDADE_VALOR: [MessageHandler(filters.TEXT & ~filters.COMMAND, mudar_unidade_receber)],
+            CONFIG_MENU:          [MessageHandler(filters.TEXT & ~filters.COMMAND, config_resposta)],
+            MUDAR_UNIDADE_VALOR:  [MessageHandler(filters.TEXT & ~filters.COMMAND, mudar_unidade_receber)],
+            GASTOS_MENU:          [MessageHandler(filters.TEXT & ~filters.COMMAND, gastos_resposta)],
+            GASTO_DESCRICAO:      [MessageHandler(filters.TEXT & ~filters.COMMAND, receber_gasto_descricao)],
+            GASTO_VALOR:          [MessageHandler(filters.TEXT & ~filters.COMMAND, receber_gasto_valor)],
         },
         fallbacks=fallbacks_padrao,
     )
@@ -2408,7 +2564,7 @@ def main():
     app.add_handler(CommandHandler("migrar_casas", cmd_migrar_casas))
     app.add_handler(conv_nova)
     app.add_handler(conv_editar)
-    app.add_handler(conv_unidade)
+    app.add_handler(conv_config)
     app.add_handler(conv_resultados)
     app.add_handler(conv_gerar)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_botao))

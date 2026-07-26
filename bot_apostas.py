@@ -789,6 +789,8 @@ async def resultados(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     unidade_atual = get_unidade_atual()
     # Lucro em unidades: usa a unidade registrada em cada aposta (histórico fiel)
     lucro_unidades = sum(lucro_aposta(a) / float(a.get("unidade") or 50) for a in res)
+    lucro_medio    = lucro_total / len(res) if res else 0
+    capital_atual  = BANCA_INICIAL + lucro_total - stake_curso - total_gastos()
 
     agora = datetime.now()
     hoje_date = agora.date()
@@ -822,7 +824,9 @@ async def resultados(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"{emoji} *Resultados Gerais*\n\n"
         f"💰 Lucro Total: *{sinal}R$ {lucro_total:.2f}* ({lucro_unidades:+.2f}u)\n"
         f"📊 ROI: *{roi:+.1%}* | Progressão: *{progressao:+.2%}*\n"
+        f"📐 Média/aposta: *R$ {lucro_medio:.2f}*\n"
         f"🏆 {vitorias}V / {len(res)-vitorias}D\n"
+        f"🏦 Capital Atual: *R$ {capital_atual:.2f}*\n"
         f"⏳ Stake em curso: *R$ {stake_curso:.2f}* ({len(pendentes_ap)} ap) | Possível ganho: *+R$ {possivel_ganho:.2f}*\n\n"
         f"{emoji_m} {nome_mes_atual}: *{sinal_m}R$ {lucro_mes:.2f}* ({lucro_mes_u:+.2f}u) | {len(res_mes)} ap\n"
         f"{emoji_s} Semana: *{sinal_s}R$ {lucro_semana:.2f}* ({lucro_semana_u:+.2f}u) | {len(res_semana)} ap",
@@ -1001,6 +1005,9 @@ async def resultados_dia(update: Update, ctx: ContextTypes.DEFAULT_TYPE, raw: st
         return True
     lucro_dia   = sum(lucro_aposta(a) for a in do_dia)
     lucro_dia_u = sum(lucro_aposta(a) / float(a.get("unidade") or 50) for a in do_dia)
+    stake_dia   = sum(float(a["stake"]) for a in do_dia)
+    media_dia   = lucro_dia / len(do_dia) if do_dia else 0
+    roi_dia     = lucro_dia / stake_dia if stake_dia else 0
     g  = sum(1 for a in do_dia if a["resultado"] == "ganhou")
     p  = sum(1 for a in do_dia if a["resultado"] == "perdeu")
     co = sum(1 for a in do_dia if eh_cashout(a))
@@ -1010,7 +1017,10 @@ async def resultados_dia(update: Update, ctx: ContextTypes.DEFAULT_TYPE, raw: st
     resumo_str = f"{g}V {p}D"
     if co: resumo_str += f" {co}CO"
     if vo: resumo_str += f" {vo}Void"
-    linhas = [f"{emoji} *{data_obj.strftime('%d/%m/%Y')}* — {resumo_str} — {sinal}R$ {lucro_dia:.2f} ({lucro_dia_u:+.2f}u)\n"]
+    linhas = [
+        f"{emoji} *{data_obj.strftime('%d/%m/%Y')}* — {resumo_str} — {sinal}R$ {lucro_dia:.2f} ({lucro_dia_u:+.2f}u)\n"
+        f"📊 Média/aposta: R$ {media_dia:.2f} | ROI do dia: {roi_dia:+.1%}\n"
+    ]
     emojis_res = {"ganhou":"✅","perdeu":"❌"}
     for a in do_dia:
         l   = lucro_aposta(a)
@@ -1183,7 +1193,8 @@ async def editar_navegar(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     info = (
         f"✏️ *Aposta #{id_alvo}*\n\n📅 {data_fmt}{hora}\n🏷 {aposta['descricao']}\n"
         f"🔢 Odd: {float(aposta['odd']):g}\n💰 Stake: R$ {float(aposta['stake']):.2f}\n"
-        f"🏦 Casa: {aposta.get('casa','')}\n📊 Resultado: {_label_res.get(aposta['resultado'], aposta['resultado'])}\n"
+        f"🏦 Casa: {aposta.get('casa','')}\n🏅 Esporte: {aposta.get('esporte','')}\n"
+        f"📊 Resultado: {_label_res.get(aposta['resultado'], aposta['resultado'])}\n"
         f"🎁 Freebet: R$ {float(aposta['freebet'] or 0):.2f}\n\n*Qual campo editar?*"
     )
     teclado = [[CAMPOS_LABEL[c]] for c in CAMPOS_EDITAVEIS] + [[CANCELAR_BTN]]
@@ -1785,6 +1796,7 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
     odd_media_e      = sum(float(a["odd"]) for a in df_res) / len(df_res) if df_res else 0
     maior_lucro_e    = max((lucro_aposta(a) for a in apostas_ganhas), default=0)
     maior_perda_e    = min((lucro_aposta(a) for a in apostas_perdidas), default=0)
+    lucro_medio_e    = lucro_total / len(df_res) if df_res else 0
 
     seq_verde_max = seq_verm_max = seq_verde_cur = seq_verm_cur = 0
     seq_verde_ini_id = seq_verde_fim_id = seq_verm_ini_id = seq_verm_fim_id = None
@@ -1846,6 +1858,7 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
         ("Stake Investida Total (R$)",  round(stake_total_e, 2),      "#,##0.00", False),
         ("Stake Média (R$)",            round(stake_media_e, 2),      "#,##0.00", False),
         ("Odd Média",                   round(odd_media_e, 3),        "0.000",    False),
+        ("Lucro Médio por Aposta (R$)", round(lucro_medio_e, 2),      "#,##0.00", True),
         ("Maior Odd Acertada",          round(maior_odd_acert, 3),    "0.000",    False),
         ("Maior Stake (R$)",            round(maior_stake_val, 2),    "#,##0.00", False),
         ("Maior Lucro em uma aposta (R$)", round(maior_lucro_e, 2),  "#,##0.00", True),
@@ -2130,6 +2143,7 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
     from collections import defaultdict
     import calendar as _cal
     import datetime as _dtcal
+    from openpyxl.comments import Comment
 
     por_dia=defaultdict(list)
     for a in df_res:
@@ -2145,6 +2159,8 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
 
     # lucro por dia (dict date_str → float)
     lucro_por_dia = {k: round(sum(lucro_aposta(a) for a in v), 2) for k,v in por_dia.items()}
+    stake_por_dia = {k: sum(float(a["stake"]) for a in v) for k,v in por_dia.items()}
+    n_por_dia     = {k: len(v) for k,v in por_dia.items()}
 
     # Paleta
     BG_GREEN_STRONG = "0D5C2E"; BG_GREEN_MID = "1A8A3E"; BG_GREEN_LIGHT = "2DB55D"
@@ -2215,6 +2231,15 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
                     cel.font = Font(name="Arial", bold=True, size=9, color=fc_txt)
                     cel.fill = PatternFill("solid", start_color=bg)
                     cel.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                    if lucro_d is not None:
+                        n_d = n_por_dia.get(data_str, 0)
+                        stake_d = stake_por_dia.get(data_str, 0)
+                        media_d = lucro_d / n_d if n_d else 0
+                        roi_d = lucro_d / stake_d if stake_d else 0
+                        cel.comment = Comment(
+                            f"{n_d} aposta(s)\nMédia/aposta: R$ {media_d:.2f}\nROI do dia: {roi_d:+.1%}",
+                            "Dashboard"
+                        )
             wd.row_dimensions[row_cursor].height = 42
             row_cursor += 1
 

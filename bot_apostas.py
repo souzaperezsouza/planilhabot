@@ -1618,13 +1618,13 @@ if __name__ == "__main__":
             "⚠️ *Os dados já estão embutidos no script.*\n"
             "Funciona mesmo se o banco antigo sumir.\n\n"
             "*Como usar:*\n\n"
-            "1️⃣ Salve o `migrar\\_db.py` na pasta Downloads\n"
-            "2️⃣ Atualize `NEW\\_URL` no arquivo com a *External URL* do banco novo\n"
-            "3️⃣ No `bot\\_apostas.py`, atualize `DATABASE\\_URL` com a *External URL* também\n"
+            "1️⃣ Salve o `migrar_db.py` na pasta Downloads\n"
+            "2️⃣ Atualize `NEW_URL` no arquivo com a *External URL* do banco novo\n"
+            "3️⃣ No `bot_apostas.py`, atualize `DATABASE_URL` com a *External URL* também\n"
             "4️⃣ No CMD:\n"
             "   `cd C:\\\\Users\\\\enzop\\\\Downloads`\n"
-            "   `python migrar\\_db.py`\n"
-            "5️⃣ Render → Environment → `DATABASE\\_URL` = *Internal URL* → *Manual Deploy*"
+            "   `python migrar_db.py`\n"
+            "5️⃣ Render → Environment → `DATABASE_URL` = *Internal URL* → *Manual Deploy*"
         )
         await update.message.reply_document(
             document=InputFile(io.BytesIO(script_bytes), filename="migrar_db.py"),

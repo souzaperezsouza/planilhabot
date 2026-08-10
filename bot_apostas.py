@@ -251,16 +251,35 @@ def carregar():
             cur.execute("SELECT * FROM apostas ORDER BY data ASC, horario ASC, id ASC")
             return [dict(r) for r in cur.fetchall()]
 
+def proximo_id_disponivel(cur):
+    """Acha a menor 'tag' (ID) livre — de uma aposta que foi deletada, por exemplo.
+    Se não houver nenhum buraco na sequência de IDs, retorna o próximo ID normal (max+1)."""
+    cur.execute("""
+        SELECT MIN(s.id)
+        FROM generate_series(1, (SELECT COALESCE(MAX(id), 0) FROM apostas)) AS s(id)
+        LEFT JOIN apostas a ON a.id = s.id
+        WHERE a.id IS NULL
+    """)
+    gap = cur.fetchone()[0]
+    if gap is not None:
+        return gap
+    cur.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM apostas")
+    return cur.fetchone()[0]
+
 def inserir(a):
     unidade = get_unidade_atual()
     with conectar() as conn:
         with conn.cursor() as cur:
+            novo_id = proximo_id_disponivel(cur)
             cur.execute("""
-                INSERT INTO apostas (data,horario,descricao,odd,stake,resultado,casa,esporte,freebet,unidade)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id
-            """, (a["data"],a["horario"],a["descricao"],a["odd"],a["stake"],
+                INSERT INTO apostas (id,data,horario,descricao,odd,stake,resultado,casa,esporte,freebet,unidade)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id
+            """, (novo_id, a["data"],a["horario"],a["descricao"],a["odd"],a["stake"],
                   a["resultado"],a["casa"],a["esporte"],float(a.get("freebet") or 0),unidade))
             new_id = cur.fetchone()[0]
+            # mantém a sequência do SERIAL sincronizada mesmo quando um buraco é preenchido,
+            # pra nunca colidir se algum outro trecho de código usar o ID automático (DEFAULT)
+            cur.execute("SELECT setval(pg_get_serial_sequence('apostas','id'), (SELECT MAX(id) FROM apostas))")
         conn.commit()
     return new_id
 
@@ -1580,19 +1599,37 @@ if __name__ == "__main__":
         cashout_valor NUMERIC(10,2) DEFAULT 0)""")
     cur.execute("""CREATE TABLE IF NOT EXISTS configuracoes (
         chave VARCHAR(50) PRIMARY KEY, valor TEXT NOT NULL)""")
-    cur.execute("DELETE FROM apostas")
-    cur.execute("DELETE FROM configuracoes")
+    conn.commit()
 
     import time as _time
     total_ap = len(APOSTAS)
-    print(f"Inserindo {{total_ap}} apostas...")
+    print(f"Inserindo {{total_ap}} apostas (pode cair e rodar de novo — retoma sozinho)...")
     bar_width = 40
     t_inicio = _time.time()
-    for i, a in enumerate(APOSTAS, 1):
-        cur.execute("""INSERT INTO apostas
-            (id,data,horario,descricao,odd,stake,resultado,casa,esporte,freebet,unidade,cashout_valor)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""", a)
-        if i % 10 == 0 or i == total_ap:
+    COMMIT_A_CADA = 100
+    i = 0
+    while i < total_ap:
+        a = APOSTAS[i]
+        try:
+            cur.execute("""INSERT INTO apostas
+                (id,data,horario,descricao,odd,stake,resultado,casa,esporte,freebet,unidade,cashout_valor)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT (id) DO UPDATE SET
+                    data=EXCLUDED.data, horario=EXCLUDED.horario, descricao=EXCLUDED.descricao,
+                    odd=EXCLUDED.odd, stake=EXCLUDED.stake, resultado=EXCLUDED.resultado,
+                    casa=EXCLUDED.casa, esporte=EXCLUDED.esporte, freebet=EXCLUDED.freebet,
+                    unidade=EXCLUDED.unidade, cashout_valor=EXCLUDED.cashout_valor""", a)
+            i += 1
+        except psycopg2.OperationalError as e:
+            print(f"\\n⚠️  Conexão caiu em {{i}}/{{total_ap}}: {{e}}. Reconectando em 3s...")
+            _time.sleep(3)
+            try: conn.rollback()
+            except Exception: pass
+            conn = psycopg2.connect(NEW_URL)
+            cur = conn.cursor()
+            continue
+        if i % COMMIT_A_CADA == 0 or i == total_ap:
+            conn.commit()
             pct = i / total_ap
             feito = int(bar_width * pct)
             barra = "█" * feito + "░" * (bar_width - feito)

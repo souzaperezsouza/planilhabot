@@ -181,7 +181,8 @@ def teclado_resultados():
 
 def teclado_gerar():
     return ReplyKeyboardMarkup([
-        ["📊 Gerar Dashboard", "📂 Gerar Dados"],
+        ["📊 Gerar Dashboard", "🌐 Dashboard HTML"],
+        ["📂 Gerar Dados"],
         ["🔙 Voltar"],
     ], resize_keyboard=True)
 
@@ -1503,6 +1504,7 @@ async def gerar_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "📊 *Exportar*\n\n"
         "• *Gerar Dashboard* → xlsx com estatísticas e gráficos\n"
+        "• *Dashboard HTML* → página única offline, abre no navegador\n"
         "• *Gerar Dados* → xlsx com dados brutos para migração de banco",
         reply_markup=teclado_gerar(), parse_mode="Markdown"
     )
@@ -1515,6 +1517,10 @@ async def gerar_resposta(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return await voltar_menu(update, ctx)
     if txt == "📊 Gerar Dashboard":
         await gerar_dashboard(update, ctx)
+        await update.message.reply_text("O que mais?", reply_markup=teclado_gerar())
+        return GERAR_MENU
+    if txt == "🌐 Dashboard HTML":
+        await gerar_dashboard_html(update, ctx)
         await update.message.reply_text("O que mais?", reply_markup=teclado_gerar())
         return GERAR_MENU
     if txt == "📂 Gerar Dados":
@@ -1674,6 +1680,318 @@ if __name__ == "__main__":
 
 
 # ── GERAR DASHBOARD ───────────────────────────────────────────────────────────
+async def gerar_dashboard_html(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("⏳ Gerando dashboard em HTML, aguarde...")
+    try:
+        html = _construir_dashboard_html()
+        buf = io.BytesIO(html.encode("utf-8"))
+        buf.seek(0)
+        await update.message.reply_document(
+            document=InputFile(buf, filename="dashboard.html"),
+            caption="🌐 Abre o arquivo no navegador — funciona offline, sem instalar nada."
+        )
+    except Exception as _e:
+        import traceback as _tb
+        _trace = _tb.format_exc()[-700:]
+        try:
+            await update.message.reply_text(f"❌ Erro ao gerar dashboard HTML:\n{str(_e)}\n\n{_trace}")
+        except Exception:
+            await update.message.reply_text("❌ Erro ao gerar dashboard HTML. Verifique os logs.")
+
+def _construir_dashboard_html():
+    """Monta um dashboard em um único arquivo .html autocontido (CSS e JS
+    embutidos, sem chamadas externas) com os mesmos dados/métricas do
+    dashboard em Excel, mas navegável e filtrável direto no navegador."""
+    import json
+
+    apostas = carregar()
+    apostas_ord = sorted(apostas, key=lambda a: (str(a["data"]), a.get("horario") or "99:99", int(a["id"])))
+    df_res = [a for a in apostas_ord if a["resultado"] in ("ganhou", "perdeu") or eh_cashout(a)]
+
+    BANCA = 5000
+    lucro_total = sum(lucro_aposta(a) for a in df_res)
+    stake_total = sum(float(a["stake"]) for a in df_res)
+    vitorias    = sum(1 for a in df_res if a["resultado"] == "ganhou")
+    win_rate    = vitorias / len(df_res) if df_res else 0
+    roi         = lucro_total / stake_total if stake_total else 0
+    progressao  = lucro_total / BANCA
+    total       = len(apostas)
+    resolvidas  = len(df_res)
+    pendentes   = total - resolvidas
+    stake_curso = sum(float(a["stake"]) for a in apostas if a["resultado"] == "pendente")
+    lucro_units = sum(lucro_aposta(a) / float(a.get("unidade") or 50) for a in df_res)
+
+    # série de evolução da banca (lucro acumulado, só apostas resolvidas)
+    banca_serie = []
+    acum = 0.0
+    for a in df_res:
+        acum += lucro_aposta(a)
+        banca_serie.append(acum)
+
+    # linhas completas pra tabela navegável
+    linhas = []
+    acum2 = 0.0
+    for a in apostas_ord:
+        res = a["resultado"]
+        lucro_a = lucro_u_a = banca_a = None
+        if res in ("ganhou", "perdeu") or eh_cashout(a):
+            lucro_a = round(lucro_aposta(a), 2)
+            unid_a  = float(a.get("unidade") or 50)
+            lucro_u_a = round(lucro_a / unid_a, 2) if unid_a else None
+            acum2 += lucro_a
+            banca_a = round(acum2, 2)
+        res_d = {"ganhou": "Green", "perdeu": "Red", "void": "Void", "pendente": "Pendente"}.get(res, res)
+        if eh_cashout(a):
+            res_d = "Cashout"
+        data_fmt = a["data"].strftime("%d/%m/%Y") if hasattr(a["data"], "strftime") else str(a["data"])[:10]
+        linhas.append({
+            "id": a["id"], "data": data_fmt, "hora": a.get("horario") or "",
+            "descricao": a["descricao"], "odd": float(a["odd"]), "stake": float(a["stake"]),
+            "esporte": a.get("esporte") or "", "casa": a.get("casa") or "",
+            "resultado": res_d, "lucro": lucro_a, "lucro_u": lucro_u_a, "banca": banca_a,
+        })
+
+    def agrega(chave):
+        grupos = {}
+        for a in df_res:
+            k = a.get(chave) or "—"
+            g = grupos.setdefault(k, {"n": 0, "green": 0, "lucro": 0.0, "stake": 0.0})
+            g["n"] += 1
+            g["lucro"] += lucro_aposta(a)
+            g["stake"] += float(a["stake"])
+            if a["resultado"] == "ganhou":
+                g["green"] += 1
+        out = [{
+            "nome": k, "n": g["n"],
+            "win_rate": g["green"] / g["n"] if g["n"] else 0,
+            "lucro": round(g["lucro"], 2),
+            "roi": g["lucro"] / g["stake"] if g["stake"] else 0,
+        } for k, g in grupos.items()]
+        out.sort(key=lambda x: x["lucro"], reverse=True)
+        return out
+
+    por_casa = agrega("casa")
+    por_esporte = agrega("esporte")
+
+    def svg_evolucao(serie):
+        if not serie:
+            return "<p class='vazio'>Sem apostas resolvidas ainda.</p>"
+        w, h = 900, 260
+        pad_l, pad_r, pad_t, pad_b = 40, 20, 20, 30
+        n = len(serie)
+        minv = min(0, min(serie))
+        maxv = max(0, max(serie))
+        span = (maxv - minv) or 1
+        def x_of(i): return pad_l + ((i / (n - 1)) if n > 1 else 0) * (w - pad_l - pad_r)
+        def y_of(v): return pad_t + (1 - (v - minv) / span) * (h - pad_t - pad_b)
+        pts = [(x_of(i), y_of(v)) for i, v in enumerate(serie)]
+        path = "M " + " L ".join(f"{x:.1f},{y:.1f}" for x, y in pts)
+        area = path + f" L {pts[-1][0]:.1f},{y_of(0):.1f} L {pts[0][0]:.1f},{y_of(0):.1f} Z"
+        zero_y = y_of(0)
+        cor_linha = "var(--green)" if serie[-1] >= 0 else "var(--red)"
+        return (
+            f'<svg viewBox="0 0 {w} {h}" class="chart-svg" preserveAspectRatio="none">'
+            f'<line x1="{pad_l}" y1="{zero_y:.1f}" x2="{w - pad_r}" y2="{zero_y:.1f}" class="zero-line"/>'
+            f'<path d="{area}" fill="{cor_linha}" opacity="0.15"/>'
+            f'<path d="{path}" class="chart-line" stroke="{cor_linha}"/>'
+            f'</svg>'
+        )
+
+    chart_html = svg_evolucao(banca_serie)
+    linhas_json = json.dumps(linhas, ensure_ascii=False)
+    esportes_opts = "".join(f'<option value="{e}">{e}</option>' for e in sorted({l["esporte"] for l in linhas if l["esporte"]}))
+    casas_opts = "".join(f'<option value="{c}">{c}</option>' for c in sorted({l["casa"] for l in linhas if l["casa"]}))
+
+    def barra_grupo(titulo, dados):
+        maxlucro = max((abs(d["lucro"]) for d in dados), default=1) or 1
+        corpo = ""
+        for d in dados:
+            pct = min(100, abs(d["lucro"]) / maxlucro * 100)
+            cls = "pos" if d["lucro"] >= 0 else "neg"
+            corpo += (
+                f'<div class="bar-row"><div class="bar-label">{d["nome"]}</div>'
+                f'<div class="bar-track"><div class="bar-fill {cls}" style="width:{pct:.1f}%"></div></div>'
+                f'<div class="bar-val {cls}">R$ {d["lucro"]:+.2f}</div>'
+                f'<div class="bar-meta">{d["n"]} apostas · {d["win_rate"]:.0%} green · ROI {d["roi"]:+.1%}</div></div>'
+            )
+        return f'<div class="card"><h3>{titulo}</h3>{corpo}</div>'
+
+    return f"""<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard de Apostas</title>
+<style>
+  :root {{
+    --bg:#0f172a; --card:#172136; --border:#2b3a55; --text:#e2e8f0; --muted:#94a3b8;
+    --green:#22c55e; --red:#ef4444; --amber:#f59e0b;
+  }}
+  * {{ box-sizing:border-box; }}
+  body {{ margin:0; font-family:'Segoe UI',Roboto,Arial,sans-serif;
+    background:linear-gradient(180deg,var(--bg),#0b1220); color:var(--text); padding:32px 24px 80px; }}
+  h1 {{ font-size:26px; margin:0 0 4px; }}
+  .sub {{ color:var(--muted); margin-bottom:28px; font-size:14px; }}
+  .cards {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:14px; margin-bottom:28px; }}
+  .stat {{ background:var(--card); border:1px solid var(--border); border-radius:14px; padding:16px; }}
+  .stat .lbl {{ font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }}
+  .stat .val {{ font-size:22px; font-weight:700; margin-top:6px; }}
+  .pos {{ color:var(--green); }} .neg {{ color:var(--red); }} .amber {{ color:var(--amber); }}
+  .card {{ background:var(--card); border:1px solid var(--border); border-radius:14px; padding:20px; margin-bottom:24px; }}
+  .card h3 {{ margin-top:0; font-size:16px; }}
+  .chart-svg {{ width:100%; height:260px; }}
+  .chart-line {{ fill:none; stroke-width:2.5; }}
+  .zero-line {{ stroke:var(--border); stroke-dasharray:4 4; }}
+  .grid2 {{ display:grid; grid-template-columns:1fr 1fr; gap:24px; }}
+  @media (max-width:900px) {{ .grid2 {{ grid-template-columns:1fr; }} }}
+  .bar-row {{ margin-bottom:14px; }}
+  .bar-label {{ font-size:13px; margin-bottom:4px; font-weight:600; }}
+  .bar-track {{ background:#0f172a; border-radius:8px; height:10px; overflow:hidden; }}
+  .bar-fill {{ height:100%; border-radius:8px; }}
+  .bar-fill.pos {{ background:var(--green); }} .bar-fill.neg {{ background:var(--red); }}
+  .bar-val {{ font-size:12px; margin-top:3px; font-weight:600; }}
+  .bar-meta {{ font-size:11px; color:var(--muted); }}
+  .filters {{ display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px; }}
+  .filters input, .filters select {{ background:#0f172a; border:1px solid var(--border); color:var(--text);
+    padding:8px 10px; border-radius:8px; font-size:13px; }}
+  table {{ width:100%; border-collapse:collapse; font-size:13px; }}
+  th, td {{ padding:8px 10px; text-align:center; border-bottom:1px solid var(--border); white-space:nowrap; }}
+  th {{ position:sticky; top:0; background:#111a2e; cursor:pointer; user-select:none; font-size:12px;
+    text-transform:uppercase; color:var(--muted); }}
+  th:hover {{ color:var(--text); }}
+  td.desc {{ text-align:left; white-space:normal; max-width:320px; }}
+  tbody tr:hover {{ background:rgba(255,255,255,0.03); }}
+  .table-wrap {{ max-height:640px; overflow:auto; border-radius:10px; }}
+  .badge {{ padding:2px 8px; border-radius:20px; font-size:11px; font-weight:700; }}
+  .badge.Green {{ background:rgba(34,197,94,.15); color:var(--green); }}
+  .badge.Red {{ background:rgba(239,68,68,.15); color:var(--red); }}
+  .badge.Void, .badge.Cashout {{ background:rgba(245,158,11,.15); color:var(--amber); }}
+  .badge.Pendente {{ background:rgba(148,163,184,.15); color:var(--muted); }}
+  footer {{ color:var(--muted); font-size:12px; text-align:center; margin-top:40px; }}
+</style>
+</head>
+<body>
+  <h1>📊 Dashboard de Apostas</h1>
+  <div class="sub">Gerado em {datetime.now().strftime('%d/%m/%Y %H:%M')} · {total} apostas registradas</div>
+
+  <div class="cards">
+    <div class="stat"><div class="lbl">Total</div><div class="val">{total}</div></div>
+    <div class="stat"><div class="lbl">Resolvidas</div><div class="val">{resolvidas}</div></div>
+    <div class="stat"><div class="lbl">Pendentes</div><div class="val {'amber' if pendentes else ''}">{pendentes}</div></div>
+    <div class="stat"><div class="lbl">Win Rate</div><div class="val {'pos' if win_rate >= 0.5 else 'neg'}">{win_rate:.1%}</div></div>
+    <div class="stat"><div class="lbl">Lucro R$</div><div class="val {'pos' if lucro_total >= 0 else 'neg'}">R$ {lucro_total:.2f}</div></div>
+    <div class="stat"><div class="lbl">Lucro Units</div><div class="val {'pos' if lucro_units >= 0 else 'neg'}">{lucro_units:+.1f}u</div></div>
+    <div class="stat"><div class="lbl">ROI</div><div class="val {'pos' if roi >= 0 else 'neg'}">{roi:+.1%}</div></div>
+    <div class="stat"><div class="lbl">Progressão</div><div class="val {'pos' if progressao >= 0 else 'neg'}">{progressao:+.1%}</div></div>
+    <div class="stat"><div class="lbl">Em Curso</div><div class="val {'amber' if stake_curso > 0 else ''}">R$ {stake_curso:.0f}</div></div>
+  </div>
+
+  <div class="card">
+    <h3>Evolução da Banca (lucro acumulado)</h3>
+    {chart_html}
+  </div>
+
+  <div class="grid2">
+    {barra_grupo("Por Casa de Aposta", por_casa)}
+    {barra_grupo("Por Esporte", por_esporte)}
+  </div>
+
+  <div class="card">
+    <h3>Todas as Apostas</h3>
+    <div class="filters">
+      <input id="busca" type="text" placeholder="Buscar na descrição...">
+      <select id="fEsporte"><option value="">Todos esportes</option>{esportes_opts}</select>
+      <select id="fCasa"><option value="">Todas casas</option>{casas_opts}</select>
+      <select id="fResultado">
+        <option value="">Todos resultados</option>
+        <option value="Green">Green</option><option value="Red">Red</option>
+        <option value="Void">Void</option><option value="Cashout">Cashout</option>
+        <option value="Pendente">Pendente</option>
+      </select>
+    </div>
+    <div class="table-wrap">
+      <table id="tabela">
+        <thead>
+          <tr>
+            <th data-k="id">#</th><th data-k="data">Data</th><th data-k="hora">Hora</th>
+            <th data-k="descricao" style="text-align:left">Descrição</th>
+            <th data-k="odd">Odd</th><th data-k="stake">Stake</th>
+            <th data-k="esporte">Esporte</th><th data-k="casa">Casa</th>
+            <th data-k="resultado">Resultado</th><th data-k="lucro">Lucro</th>
+            <th data-k="lucro_u">Lucro U</th><th data-k="banca">Banca</th>
+          </tr>
+        </thead>
+        <tbody id="corpoTabela"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <footer>Dashboard gerado localmente pelo bot · nenhum dado sai do seu computador</footer>
+
+<script>
+const DADOS = {linhas_json};
+let ordemAtual = {{ campo: null, asc: true }};
+
+function fmt(v, tipo) {{
+  if (v === null || v === undefined) return '—';
+  if (tipo === 'money') return 'R$ ' + Number(v).toFixed(2);
+  if (tipo === 'u') return (v >= 0 ? '+' : '') + Number(v).toFixed(2) + 'u';
+  return v;
+}}
+
+function renderizar() {{
+  const busca = document.getElementById('busca').value.toLowerCase();
+  const fEsp = document.getElementById('fEsporte').value;
+  const fCasa = document.getElementById('fCasa').value;
+  const fRes = document.getElementById('fResultado').value;
+
+  let linhas = DADOS.filter(l =>
+    (!busca || l.descricao.toLowerCase().includes(busca)) &&
+    (!fEsp || l.esporte === fEsp) &&
+    (!fCasa || l.casa === fCasa) &&
+    (!fRes || l.resultado === fRes)
+  );
+
+  if (ordemAtual.campo) {{
+    linhas.sort((a, b) => {{
+      let x = a[ordemAtual.campo], y = b[ordemAtual.campo];
+      if (x === null) x = -Infinity;
+      if (y === null) y = -Infinity;
+      if (typeof x === 'string') return ordemAtual.asc ? x.localeCompare(y) : y.localeCompare(x);
+      return ordemAtual.asc ? x - y : y - x;
+    }});
+  }}
+
+  document.getElementById('corpoTabela').innerHTML = linhas.map(l => `
+    <tr>
+      <td>#${{l.id}}</td><td>${{l.data}}</td><td>${{l.hora || ''}}</td>
+      <td class="desc">${{l.descricao}}</td>
+      <td>${{Number(l.odd).toFixed(2)}}</td><td>${{fmt(l.stake, 'money')}}</td>
+      <td>${{l.esporte}}</td><td>${{l.casa}}</td>
+      <td><span class="badge ${{l.resultado}}">${{l.resultado}}</span></td>
+      <td class="${{l.lucro == null ? '' : (l.lucro >= 0 ? 'pos' : 'neg')}}">${{fmt(l.lucro, 'money')}}</td>
+      <td class="${{l.lucro_u == null ? '' : (l.lucro_u >= 0 ? 'pos' : 'neg')}}">${{fmt(l.lucro_u, 'u')}}</td>
+      <td class="${{l.banca == null ? '' : (l.banca >= 0 ? 'pos' : 'neg')}}">${{fmt(l.banca, 'money')}}</td>
+    </tr>`).join('');
+}}
+
+document.querySelectorAll('th[data-k]').forEach(th => {{
+  th.addEventListener('click', () => {{
+    const k = th.dataset.k;
+    ordemAtual = {{ campo: k, asc: ordemAtual.campo === k ? !ordemAtual.asc : true }};
+    renderizar();
+  }});
+}});
+
+['busca', 'fEsporte', 'fCasa', 'fResultado'].forEach(id =>
+  document.getElementById(id).addEventListener('input', renderizar)
+);
+
+renderizar();
+</script>
+</body>
+</html>"""
+
 async def gerar_dashboard(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏳ Gerando dashboard, aguarde...")
     try:

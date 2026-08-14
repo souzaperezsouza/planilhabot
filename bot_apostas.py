@@ -1180,6 +1180,13 @@ async def editar_inicio(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return EDITAR_PAGINA
 
+    stake_curso    = sum(float(a["stake"]) for a in todas)
+    possivel_ganho = sum(float(a["stake"]) * (float(a["odd"]) - 1) for a in todas)
+    await update.message.reply_text(
+        f"⏳ Stake em curso: *R$ {stake_curso:.2f}* ({len(todas)} ap) | Possível ganho: *+R$ {possivel_ganho:.2f}*",
+        parse_mode="Markdown"
+    )
+
     linhas = _montar_linhas_listagem(todas)
     await enviar_paginado(
         update, linhas,

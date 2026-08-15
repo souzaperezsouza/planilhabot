@@ -6,12 +6,23 @@ import threading
 import psycopg2
 import psycopg2.extras
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from datetime import datetime, timedelta
-from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, InputFile
+from datetime import datetime, timedelta, timezone
+import base64
+import json
+from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, InputFile, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
-    ConversationHandler, ContextTypes, filters
+    ConversationHandler, ContextTypes, filters, CallbackQueryHandler
 )
+
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+
+def esc_md(texto):
+    """Escapa caracteres especiais do Markdown legado do Telegram (_ * ` [) em texto
+    vindo do usuário, evitando erro 'Can't parse entities'."""
+    if texto is None:
+        return ""
+    return re.sub(r"([_*`\[])", r"\\\1", str(texto))
 
 TOKEN         = "8790751046:AAFHpd7q4FmgUZrq3PA4eMb06fMyMaiL5lE"
 DATABASE_URL  = os.environ.get("DATABASE_URL", "postgresql://db_agosto_user:PFHKs2tAkF56glg3spSFRxfZxYIEtqe7@dpg-d9ogtltbedkc73csa7k0-a.oregon-postgres.render.com/db_agosto")
@@ -161,10 +172,12 @@ VOLTAR_BTN   = "⬅️ Voltar"
 
 # ── TECLADOS ──────────────────────────────────────────────────────────────────
 def teclado_menu():
+    modo_ia_label = "🤖 Modo IA: ON ✅" if get_modo_ia() else "🤖 Modo IA: OFF"
     return ReplyKeyboardMarkup([
         ["📝 Nova aposta",   "⏳ Ver pendentes"],
         ["📈 Resultados",    "✏️ Editar aposta"],
         ["📊 Gerar Resultados", "⚙️ Configurações"],
+        [modo_ia_label],
     ], resize_keyboard=True)
 
 def teclado_cancelar():
@@ -232,6 +245,10 @@ def inicializar_db():
             """)
             cur.execute("""
                 INSERT INTO configuracoes (chave, valor) VALUES ('unidade_atual', '50')
+                ON CONFLICT (chave) DO NOTHING
+            """)
+            cur.execute("""
+                INSERT INTO configuracoes (chave, valor) VALUES ('modo_ia', '0')
                 ON CONFLICT (chave) DO NOTHING
             """)
             cur.execute("""
@@ -311,6 +328,22 @@ def get_unidade_atual():
             cur.execute("SELECT valor FROM configuracoes WHERE chave='unidade_atual'")
             row = cur.fetchone()
     return float(row[0]) if row else 50.0
+
+def get_modo_ia():
+    with conectar() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT valor FROM configuracoes WHERE chave='modo_ia'")
+            row = cur.fetchone()
+    return (row[0] == "1") if row else False
+
+def set_modo_ia(ligado: bool):
+    with conectar() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO configuracoes (chave, valor) VALUES ('modo_ia', %s)
+                ON CONFLICT (chave) DO UPDATE SET valor = EXCLUDED.valor
+            """, ("1" if ligado else "0",))
+        conn.commit()
 
 def migrar_casas_gemeas():
     """Atualiza no banco todas as apostas com casas antigas para os nomes com gêmeas."""
@@ -452,6 +485,151 @@ def normalizar_esporte(s):
         return "🎯 Múltipla"
     return MAPA_ESPORTE.get(sl, s)
 
+def normalizar_esporte(s):
+    if not s: return ""
+    s = s.strip()
+    sl = s.lower()
+    if "ltipla" in sl and ("esporte" in sl or "sport" in sl or sl in ("multipla","múltipla")):
+        return "🎯 Múltipla"
+    return MAPA_ESPORTE.get(sl, s)
+
+# ── IA: extrair aposta de print/mensagem encaminhada ────────────────────────────
+def agora_brasilia():
+    """Horário de Brasília (UTC-3), calculado a partir do UTC pra não depender
+    do fuso do servidor onde o bot está rodando (Render costuma rodar em UTC)."""
+    return datetime.now(timezone.utc) - timedelta(hours=3)
+
+def extrair_aposta_via_ia(legenda: str, foto_bytes):
+    """Manda o print (e/ou a legenda) pra Claude e pede de volta um JSON
+    com os campos da aposta. Se a data/horário do evento não estiverem
+    visíveis no print, deixa a IA pesquisar na web pra achar o horário real
+    do jogo/luta/partida (custa mais tokens + $0,01 por pesquisa, mas evita
+    salvar apostas com data errada). Levanta exceção se não conseguir extrair."""
+    import anthropic
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+    hoje = agora_brasilia().strftime("%Y-%m-%d")
+    esportes_nomes = ", ".join(e.split(" ", 1)[-1] for e in ESPORTES if e != "Outro")
+    prompt = (
+        "Você recebe o print de uma aposta esportiva (bilhete/bet slip) de uma casa de apostas, "
+        "às vezes junto com uma legenda escrita pelo apostador. Extraia os dados da aposta.\n\n"
+        "Sobre DATA e HORÁRIO: se não estiverem visíveis claramente no print (algumas casas não "
+        "mostram, ou o print está cortado), use a ferramenta de busca na web para descobrir a data "
+        "e o horário reais do jogo/partida/luta envolvido, com base nos times/atletas/competição "
+        "identificados na imagem ou na legenda. O horário encontrado na busca deve ser convertido "
+        "para o horário de Brasília (UTC-3) antes de preencher o campo 'horario' — muitos sites "
+        "mostram o horário em UTC ou no fuso do país sede do evento, então ajuste a conversão. "
+        "Só use a data de hoje como último recurso, se a busca não encontrar nada.\n\n"
+        "Depois de pesquisar (se precisar), sua resposta final deve conter SOMENTE um JSON válido "
+        "(sem texto antes/depois, sem cerca de markdown), neste formato exato:\n"
+        '{"descricao": "...", "odd": 0.0, "stake": 0.0, "casa": "...", "esporte": "...", '
+        '"data": "YYYY-MM-DD", "horario": "HH:MM ou null"}\n\n'
+        f"Casas conhecidas (use uma dessas se reconhecer; senão, o nome exato que aparecer no print): "
+        f"{', '.join(CASAS)}\n"
+        f"Esportes conhecidos (idem): {esportes_nomes}\n"
+        f"Hoje é {hoje} (use como referência pra achar jogos futuros/recentes na busca).\n"
+        "'descricao' é um resumo curto e direto da seleção apostada, sem casa/odd/valor "
+        "(ex: '1.5 bases Colt Emerson').\n"
+        f"Legenda enviada junto pelo apostador (pode trazer dados extras, ou estar vazia): "
+        f"{legenda or '(vazia)'}"
+    )
+
+    content = [{"type": "text", "text": prompt}]
+    if foto_bytes:
+        content.insert(0, {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": "image/jpeg",
+                "data": base64.b64encode(foto_bytes).decode("utf-8"),
+            },
+        })
+
+    resp = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=1200,
+        tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 3}],
+        messages=[{"role": "user", "content": content}],
+    )
+    blocos_texto = [b.text for b in resp.content if getattr(b, "type", None) == "text"]
+    texto = blocos_texto[-1].strip() if blocos_texto else ""
+    texto = texto.strip("`").strip()
+    if texto.lower().startswith("json"):
+        texto = texto[4:].strip()
+    m = re.search(r"\{.*\}", texto, re.DOTALL)
+    if m:
+        texto = m.group(0)
+    dados = json.loads(texto)
+
+    dados["casa"]    = normalizar_casa(str(dados.get("casa") or "Outra"))
+    dados["esporte"] = normalizar_esporte(str(dados.get("esporte") or "Outro"))
+    dados["odd"]     = float(dados["odd"])
+    dados["stake"]   = float(dados["stake"])
+    dados["descricao"] = str(dados.get("descricao") or "").strip() or "(sem descrição)"
+    if not dados.get("data"):
+        dados["data"] = hoje
+    if not dados.get("horario"):
+        dados["horario"] = ""
+    return dados
+
+async def receber_encaminhada(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Handler de nível superior (fora de qualquer conversa): quando chega uma
+    foto (print de aposta encaminhado), manda pra IA extrair os dados e pede
+    confirmação por botão antes de salvar de verdade."""
+    msg = update.message
+    if not msg or not msg.photo:
+        return
+    if not get_modo_ia():
+        return  # Modo IA desligado: ignora fotos silenciosamente
+    legenda = msg.caption or ""
+
+    tg_file = await msg.photo[-1].get_file()
+    foto_bytes = bytes(await tg_file.download_as_bytearray())
+
+    aviso = await msg.reply_text("🤖 Lendo o print, aguenta aí...")
+    try:
+        dados = extrair_aposta_via_ia(legenda, foto_bytes)
+    except Exception as e:
+        logging.exception("Falha ao extrair aposta via IA")
+        await aviso.edit_text(f"❌ Não consegui ler essa aposta automaticamente.\n{e}")
+        return
+
+    ctx.user_data["ia_pendente"] = dados
+    data_fmt = datetime.strptime(dados["data"], "%Y-%m-%d").strftime("%d/%m/%Y")
+    hora_txt = f" às {dados['horario']}" if dados.get("horario") else ""
+    preview = (
+        f"🤖 *Aposta detectada:*\n\n"
+        f"📅 {data_fmt}{hora_txt}\n🏅 {esc_md(dados['esporte'])}\n"
+        f"🏷 {esc_md(dados['descricao'])}\n🔢 Odd: {dados['odd']:g}\n"
+        f"💰 Stake: R$ {dados['stake']:.2f}\n🏦 Casa: {esc_md(dados['casa'])}\n\n"
+        f"Confirma?"
+    )
+    teclado = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Salvar", callback_data="ia_salvar"),
+        InlineKeyboardButton("❌ Descartar", callback_data="ia_descartar"),
+    ]])
+    try:
+        await aviso.edit_text(preview, parse_mode="Markdown", reply_markup=teclado)
+    except Exception:
+        await aviso.edit_text(preview.replace("*", ""), reply_markup=teclado)
+
+async def ia_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Processa o clique em Salvar/Descartar do preview gerado pela IA."""
+    query = update.callback_query
+    await query.answer()
+    dados = ctx.user_data.pop("ia_pendente", None)
+    if query.data == "ia_descartar" or not dados:
+        await query.edit_message_text("❌ Descartado.")
+        return
+    dados["resultado"] = "pendente"
+    dados["freebet"] = 0
+    try:
+        new_id = inserir(dados)
+        await query.edit_message_text(f"✅ Aposta #{new_id} salva a partir do print!")
+    except Exception as e:
+        logging.exception("Falha ao salvar aposta extraída via IA")
+        await query.edit_message_text(f"❌ Erro ao salvar: {e}")
+
 def lucro_aposta(a):
     stake   = float(a["stake"])
     odd     = float(a["odd"])
@@ -530,6 +708,17 @@ async def menu_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text
 
     if txt == "⏳ Ver pendentes":    return await ver_pendentes(update, ctx)
+    if txt.startswith("🤖 Modo IA"):
+        novo_estado = not get_modo_ia()
+        set_modo_ia(novo_estado)
+        aviso = (
+            "🤖 *Modo IA ativado.*\nAgora é só encaminhar o print da aposta que eu leio e te "
+            "mostro pra confirmar antes de salvar."
+            if novo_estado else
+            "🤖 *Modo IA desativado.*\nFotos encaminhadas vão ser ignoradas até você ligar de novo."
+        )
+        await update.message.reply_text(aviso, reply_markup=teclado_menu(), parse_mode="Markdown")
+        return
 
 # ── NOVA APOSTA ───────────────────────────────────────────────────────────────
 async def nova_aposta_inicio(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -2968,6 +3157,8 @@ def main():
     app.add_handler(conv_config)
     app.add_handler(conv_resultados)
     app.add_handler(conv_gerar)
+    app.add_handler(CallbackQueryHandler(ia_callback, pattern="^ia_"))
+    app.add_handler(MessageHandler(filters.PHOTO, receber_encaminhada))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_botao))
 
     threading.Thread(target=iniciar_servidor, daemon=True).start()

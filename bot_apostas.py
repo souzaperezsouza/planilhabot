@@ -654,6 +654,22 @@ async def ia_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logging.exception("Falha ao salvar aposta extraída via IA")
         await query.edit_message_text(f"❌ Erro ao salvar: {e}")
+        return
+
+    _label_res_ia = {"ganhou": "Green ✅", "perdeu": "Red ❌", "void": "Void ↩️", "pendente": "Pendente ⏳"}
+    data_fmt = datetime.strptime(dados["data"], "%Y-%m-%d").strftime("%d/%m/%Y")
+    hora_txt = f" {dados['horario']}" if dados.get("horario") else ""
+    resumo = (
+        f"✏️ *Aposta #{new_id}*\n\n📅 {data_fmt}{hora_txt}\n🏷 {esc_md(dados['descricao'])}\n"
+        f"🔢 Odd: {dados['odd']:g}\n💰 Stake: R$ {dados['stake']:.2f}\n"
+        f"🏦 Casa: {esc_md(dados['casa'])}\n🏅 Esporte: {esc_md(dados['esporte'])}\n"
+        f"📊 Resultado: {_label_res_ia.get(dados['resultado'], dados['resultado'])}\n"
+        f"🎁 Freebet: R$ {float(dados.get('freebet') or 0):.2f}"
+    )
+    try:
+        await query.message.reply_text(resumo, parse_mode="Markdown")
+    except Exception:
+        await query.message.reply_text(resumo.replace("*", "").replace("_", ""))
 
 def lucro_aposta(a):
     stake   = float(a["stake"])

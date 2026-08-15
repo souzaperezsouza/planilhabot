@@ -172,7 +172,7 @@ VOLTAR_BTN   = "⬅️ Voltar"
 
 # ── TECLADOS ──────────────────────────────────────────────────────────────────
 def teclado_menu():
-    modo_ia_label = "🤖 Modo IA: ON ✅" if get_modo_ia() else "🤖 Modo IA: OFF"
+    modo_ia_label = "Modo IA: ON ✅" if get_modo_ia() else "Modo IA: OFF"
     return ReplyKeyboardMarkup([
         ["📝 Nova aposta",   "⏳ Ver pendentes"],
         ["📈 Resultados",    "✏️ Editar aposta"],
@@ -536,8 +536,11 @@ def extrair_aposta_via_ia(legenda: str, foto_bytes):
         f"{', '.join(CASAS)}\n"
         f"Esportes conhecidos (idem): {esportes_nomes}\n"
         f"Hoje é {hoje} (use como referência pra achar jogos futuros/recentes na busca).\n"
-        "'descricao' é um resumo curto e direto da seleção apostada, sem casa/odd/valor "
-        "(ex: '1.5 bases Colt Emerson').\n"
+        "'descricao' é um resumo curto e direto da seleção apostada, sem casa/odd/valor, mas "
+        "SEMPRE incluindo o jogo/confronto (times, atletas ou lutadores envolvidos) — ex: "
+        "'menos de 5.5 cartões Vasco da Gama x Santos', '1.5 bases Colt Emerson'. Se o mercado for "
+        "sobre um dos lados específicos (ex: handicap, um jogador específico), cite o nome dele e, "
+        "quando fizer sentido pro contexto, o adversário/confronto também.\n"
         f"Legenda enviada junto pelo apostador (pode trazer dados extras, ou estar vazia): "
         f"{legenda or '(vazia)'}"
     )
@@ -604,7 +607,7 @@ async def receber_encaminhada(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     tg_file = await msg.photo[-1].get_file()
     foto_bytes = bytes(await tg_file.download_as_bytearray())
 
-    aviso = await msg.reply_text("🤖 Lendo o print, aguenta aí...")
+    aviso = await msg.reply_text("Lendo a aposta...")
     try:
         dados = extrair_aposta_via_ia(legenda, foto_bytes)
     except Exception as e:
@@ -620,7 +623,7 @@ async def receber_encaminhada(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     data_fmt = datetime.strptime(dados["data"], "%Y-%m-%d").strftime("%d/%m/%Y")
     hora_txt = f" às {dados['horario']}" if dados.get("horario") else ""
     preview = (
-        f"🤖 *Aposta detectada:*\n\n"
+        f"*Aposta detectada:*\n\n"
         f"📅 {data_fmt}{hora_txt}\n🏅 {esc_md(dados['esporte'])}\n"
         f"🏷 {esc_md(dados['descricao'])}\n🔢 Odd: {dados['odd']:g}\n"
         f"💰 Stake: R$ {dados['stake']:.2f}\n🏦 Casa: {esc_md(dados['casa'])}\n\n"
@@ -730,14 +733,14 @@ async def menu_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text
 
     if txt == "⏳ Ver pendentes":    return await ver_pendentes(update, ctx)
-    if txt.startswith("🤖 Modo IA"):
+    if txt.startswith("Modo IA"):
         novo_estado = not get_modo_ia()
         set_modo_ia(novo_estado)
         aviso = (
-            "🤖 *Modo IA ativado.*\nAgora é só encaminhar o print da aposta que eu leio e te "
+            "*Modo IA ativado.*\nAgora é só encaminhar o print da aposta que eu leio e te "
             "mostro pra confirmar antes de salvar."
             if novo_estado else
-            "🤖 *Modo IA desativado.*\nFotos encaminhadas vão ser ignoradas até você ligar de novo."
+            "*Modo IA desativado.*\nFotos encaminhadas vão ser ignoradas até você ligar de novo."
         )
         await update.message.reply_text(aviso, reply_markup=teclado_menu(), parse_mode="Markdown")
         return

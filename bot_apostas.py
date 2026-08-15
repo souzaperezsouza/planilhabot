@@ -509,6 +509,7 @@ def extrair_aposta_via_ia(legenda: str, foto_bytes):
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
     hoje = agora_brasilia().strftime("%Y-%m-%d")
+    unidade_atual = get_unidade_atual()
     esportes_nomes = ", ".join(e.split(" ", 1)[-1] for e in ESPORTES if e != "Outro")
     prompt = (
         "Você recebe o print de uma aposta esportiva (bilhete/bet slip) de uma casa de apostas, "
@@ -520,6 +521,13 @@ def extrair_aposta_via_ia(legenda: str, foto_bytes):
         "para o horário de Brasília (UTC-3) antes de preencher o campo 'horario' — muitos sites "
         "mostram o horário em UTC ou no fuso do país sede do evento, então ajuste a conversão. "
         "Só use a data de hoje como último recurso, se a busca não encontrar nada.\n\n"
+        "Sobre STAKE (valor apostado): pode aparecer de duas formas.\n"
+        "1) Um valor em R$ já pronto (ex: 'R$ 50,00') — use esse valor direto.\n"
+        "2) Um número seguido de '%' ou 'u' (ex: '2%', '1u', '1.5u') — isso NÃO é porcentagem de "
+        "banca, é uma notação comum de tipster pra 'unidades de stake'. Nesse caso, cada unidade "
+        f"vale R$ {unidade_atual:.2f} agora, então calcule stake_em_reais = número_de_unidades × "
+        f"{unidade_atual:.2f} e preencha o campo 'stake' já com esse valor calculado em R$ "
+        "(não deixe o número de unidades bruto, nem o símbolo % ou u).\n\n"
         "Depois de pesquisar (se precisar), sua resposta final deve conter SOMENTE um JSON válido "
         "(sem texto antes/depois, sem cerca de markdown), neste formato exato:\n"
         '{"descricao": "...", "odd": 0.0, "stake": 0.0, "casa": "...", "esporte": "...", '
@@ -563,8 +571,18 @@ def extrair_aposta_via_ia(legenda: str, foto_bytes):
 
     dados["casa"]    = normalizar_casa(str(dados.get("casa") or "Outra"))
     dados["esporte"] = normalizar_esporte(str(dados.get("esporte") or "Outro"))
-    dados["odd"]     = float(dados["odd"])
-    dados["stake"]   = float(dados["stake"])
+    try:
+        dados["odd"] = float(dados["odd"])
+    except (TypeError, ValueError):
+        raise ValueError("não consegui identificar a *odd* nessa aposta.")
+    try:
+        dados["stake"] = float(dados["stake"])
+    except (TypeError, ValueError):
+        raise ValueError(
+            "não consegui identificar o *valor apostado*. Se o print usa uma notação tipo "
+            "\"2%\" ou \"2u\" (unidades) sem valor em R$ visível, confere se a legenda ou a "
+            "imagem deixam isso claro — senão lança essa aposta manualmente."
+        )
     dados["descricao"] = str(dados.get("descricao") or "").strip() or "(sem descrição)"
     if not dados.get("data"):
         dados["data"] = hoje
@@ -591,7 +609,11 @@ async def receber_encaminhada(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         dados = extrair_aposta_via_ia(legenda, foto_bytes)
     except Exception as e:
         logging.exception("Falha ao extrair aposta via IA")
-        await aviso.edit_text(f"❌ Não consegui ler essa aposta automaticamente.\n{e}")
+        texto_erro = f"❌ Não consegui ler essa aposta automaticamente: {e}"
+        try:
+            await aviso.edit_text(texto_erro, parse_mode="Markdown")
+        except Exception:
+            await aviso.edit_text(texto_erro.replace("*", ""))
         return
 
     ctx.user_data["ia_pendente"] = dados

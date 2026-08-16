@@ -514,20 +514,32 @@ def extrair_aposta_via_ia(legenda: str, foto_bytes):
     prompt = (
         "Você recebe o print de uma aposta esportiva (bilhete/bet slip) de uma casa de apostas, "
         "às vezes junto com uma legenda escrita pelo apostador. Extraia os dados da aposta.\n\n"
+        "Sobre ODD: em apostas de 'aumento' (odd boost), o número que aparece em destaque no "
+        "bilhete pode ser a odd ORIGINAL, e a odd de verdade (já aumentada) aparece escrita na "
+        "descrição/legenda do texto (ex: 'aumentada para 2.50', 'boost 3.00'). Quando isso "
+        "acontecer, priorize e use a odd citada na descrição/legenda, não a odd em destaque no "
+        "print.\n\n"
         "Sobre DATA e HORÁRIO: se não estiverem visíveis claramente no print (algumas casas não "
         "mostram, ou o print está cortado), use a ferramenta de busca na web para descobrir a data "
         "e o horário reais do jogo/partida/luta envolvido, com base nos times/atletas/competição "
-        "identificados na imagem ou na legenda. O horário encontrado na busca deve ser convertido "
-        "para o horário de Brasília (UTC-3) antes de preencher o campo 'horario' — muitos sites "
-        "mostram o horário em UTC ou no fuso do país sede do evento, então ajuste a conversão. "
-        "Só use a data de hoje como último recurso, se a busca não encontrar nada.\n\n"
+        "identificados na imagem ou na legenda. É CRÍTICO acertar o horário de Brasília (UTC-3): "
+        "quando pesquisar, confirme em qual fuso horário a fonte está informando o horário do jogo "
+        "(a maioria dos sites internacionais usa UTC, horário local do país-sede, ou ET dos EUA) e "
+        "só então converta pra Brasília subtraindo/somando as horas corretas — não assuma que o "
+        "horário encontrado já está em Brasília. Se tiver qualquer dúvida sobre o fuso da fonte, "
+        "prefira uma fonte que declare o fuso explicitamente. Só use a data de hoje como último "
+        "recurso, se a busca não encontrar nada.\n\n"
         "Sobre STAKE (valor apostado): pode aparecer de duas formas.\n"
         "1) Um valor em R$ já pronto (ex: 'R$ 50,00') — use esse valor direto.\n"
         "2) Um número seguido de '%' ou 'u' (ex: '2%', '1u', '1.5u') — isso NÃO é porcentagem de "
-        "banca, é uma notação comum de tipster pra 'unidades de stake'. Nesse caso, cada unidade "
-        f"vale R$ {unidade_atual:.2f} agora, então calcule stake_em_reais = número_de_unidades × "
-        f"{unidade_atual:.2f} e preencha o campo 'stake' já com esse valor calculado em R$ "
-        "(não deixe o número de unidades bruto, nem o símbolo % ou u).\n\n"
+        "banca, é uma notação comum de tipster pra 'unidades de stake'. O cálculo é simples e "
+        "direto, não complique: stake_em_reais = número_de_unidades × valor_da_unidade. "
+        f"O valor da unidade agora é R$ {unidade_atual:.2f}. Preencha o campo 'stake' já com o "
+        "valor calculado em R$ (não deixe o número de unidades bruto, nem o símbolo % ou u).\n"
+        "Algumas apostas trazem um LIMITE de stake informado na descrição/legenda (ex: 'até 2u', "
+        "'limite 1%', 'máximo R$100'). Se a quantidade de unidades/porcentagem indicada passar "
+        "desse limite, NÃO use o valor indicado — use o valor do limite. Ou seja, o limite sempre "
+        "vence quando for menor que o valor calculado normalmente.\n\n"
         "Depois de pesquisar (se precisar), sua resposta final deve conter SOMENTE um JSON válido "
         "(sem texto antes/depois, sem cerca de markdown), neste formato exato:\n"
         '{"descricao": "...", "odd": 0.0, "stake": 0.0, "casa": "...", "esporte": "...", '
@@ -654,22 +666,6 @@ async def ia_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logging.exception("Falha ao salvar aposta extraída via IA")
         await query.edit_message_text(f"❌ Erro ao salvar: {e}")
-        return
-
-    _label_res_ia = {"ganhou": "Green ✅", "perdeu": "Red ❌", "void": "Void ↩️", "pendente": "Pendente ⏳"}
-    data_fmt = datetime.strptime(dados["data"], "%Y-%m-%d").strftime("%d/%m/%Y")
-    hora_txt = f" {dados['horario']}" if dados.get("horario") else ""
-    resumo = (
-        f"✏️ *Aposta #{new_id}*\n\n📅 {data_fmt}{hora_txt}\n🏷 {esc_md(dados['descricao'])}\n"
-        f"🔢 Odd: {dados['odd']:g}\n💰 Stake: R$ {dados['stake']:.2f}\n"
-        f"🏦 Casa: {esc_md(dados['casa'])}\n🏅 Esporte: {esc_md(dados['esporte'])}\n"
-        f"📊 Resultado: {_label_res_ia.get(dados['resultado'], dados['resultado'])}\n"
-        f"🎁 Freebet: R$ {float(dados.get('freebet') or 0):.2f}"
-    )
-    try:
-        await query.message.reply_text(resumo, parse_mode="Markdown")
-    except Exception:
-        await query.message.reply_text(resumo.replace("*", "").replace("_", ""))
 
 def lucro_aposta(a):
     stake   = float(a["stake"])

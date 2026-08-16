@@ -284,6 +284,65 @@ def proximo_id_disponivel(cur):
     cur.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM apostas")
     return cur.fetchone()[0]
 
+def duplicar_aposta(id_orig: int):
+    """Duplica a aposta id_orig: copia TODOS os campos exatamente (mesma data,
+    resultado, odd, stake etc.) e insere como uma nova linha, usando o próximo
+    ID disponível (aproveitando buracos de apostas deletadas, se houver).
+    Retorna (aposta_original, novo_id) ou (None, None) se o ID não existir."""
+    with conectar() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT * FROM apostas WHERE id = %s", (id_orig,))
+            aposta = cur.fetchone()
+    if not aposta:
+        return None, None
+    aposta = dict(aposta)
+
+    with conectar() as conn:
+        with conn.cursor() as cur:
+            novo_id = proximo_id_disponivel(cur)
+            cur.execute("""
+                INSERT INTO apostas
+                    (id, data, horario, descricao, odd, stake, resultado,
+                     casa, esporte, freebet, unidade, cashout_valor)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            """, (
+                novo_id, aposta["data"], aposta.get("horario"), aposta["descricao"],
+                aposta["odd"], aposta["stake"], aposta["resultado"], aposta.get("casa"),
+                aposta.get("esporte"), aposta.get("freebet") or 0,
+                aposta.get("unidade") or 50, aposta.get("cashout_valor") or 0,
+            ))
+            cur.execute("SELECT setval(pg_get_serial_sequence('apostas','id'), (SELECT MAX(id) FROM apostas))")
+        conn.commit()
+    return aposta, novo_id
+
+async def duplicar_comando(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Handler global: qualquer mensagem 'duplicar <id>' cria uma cópia exata
+    dessa aposta (mesma data, resultado, odd, stake etc.), independente de
+    qual tela/fluxo o usuário está no momento."""
+    m = re.match(r"(?i)^duplicar\s+(\d+)$", update.message.text.strip())
+    if not m:
+        return
+    id_orig = int(m.group(1))
+    aposta, novo_id = duplicar_aposta(id_orig)
+    if aposta is None:
+        await update.message.reply_text(f"❌ Não achei nenhuma aposta #{id_orig}.")
+        return
+
+    data_fmt = aposta["data"].strftime("%d/%m/%Y") if hasattr(aposta["data"], "strftime") else str(aposta["data"])[:10]
+    hora_txt = f' às {aposta["horario"]}' if aposta.get("horario") else ""
+    res_txt = {"ganhou": "Green ✅", "perdeu": "Red ❌", "void": "Void ↩️", "pendente": "Pendente ⏳"}.get(aposta["resultado"], aposta["resultado"])
+    texto = (
+        f"✅ Aposta #{id_orig} duplicada como *#{novo_id}*\n\n"
+        f"📅 {data_fmt}{hora_txt}\n"
+        f"🏅 {esc_md(aposta.get('esporte') or '')}\n🏷 {esc_md(aposta['descricao'])}\n"
+        f"🔢 Odd: {float(aposta['odd']):g}\n💰 Stake: R$ {float(aposta['stake']):.2f}\n"
+        f"🏦 Casa: {esc_md(aposta.get('casa') or '')}\n📌 Resultado: {res_txt}"
+    )
+    try:
+        await update.message.reply_text(texto, parse_mode="Markdown")
+    except Exception:
+        await update.message.reply_text(texto.replace("*", ""))
+
 def inserir(a):
     unidade = get_unidade_atual()
     with conectar() as conn:
@@ -3189,6 +3248,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("exportar", exportar_csv))
     app.add_handler(CommandHandler("migrar_casas", cmd_migrar_casas))
+    app.add_handler(MessageHandler(filters.Regex(r"(?i)^duplicar\s+\d+$"), duplicar_comando))
     app.add_handler(conv_nova)
     app.add_handler(conv_editar)
     app.add_handler(conv_config)

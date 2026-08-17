@@ -558,12 +558,13 @@ def agora_brasilia():
     do fuso do servidor onde o bot está rodando (Render costuma rodar em UTC)."""
     return datetime.now(timezone.utc) - timedelta(hours=3)
 
-def extrair_aposta_via_ia(legenda: str, foto_bytes):
-    """Manda o print (e/ou a legenda) pra Claude e pede de volta um JSON
-    com os campos da aposta. Se a data/horário do evento não estiverem
-    visíveis no print, deixa a IA pesquisar na web pra achar o horário real
-    do jogo/luta/partida (custa mais tokens + $0,01 por pesquisa, mas evita
-    salvar apostas com data errada). Levanta exceção se não conseguir extrair."""
+def extrair_apostas_via_ia(legenda: str, foto_bytes):
+    """Manda o print (e/ou a legenda) pra Claude e pede de volta uma LISTA de
+    apostas detectadas (pode ser 1 ou várias, se o print trouxer mais de uma
+    aposta separada). Se a data/horário do evento não estiverem visíveis no
+    print, deixa a IA pesquisar na web pra achar o horário real do jogo/luta/
+    partida (custa mais tokens + $0,01 por pesquisa, mas evita salvar apostas
+    com data errada). Levanta exceção se não conseguir extrair nada."""
     import anthropic
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
@@ -572,7 +573,15 @@ def extrair_aposta_via_ia(legenda: str, foto_bytes):
     esportes_nomes = ", ".join(e.split(" ", 1)[-1] for e in ESPORTES if e != "Outro")
     prompt = (
         "Você recebe o print de uma aposta esportiva (bilhete/bet slip) de uma casa de apostas, "
-        "às vezes junto com uma legenda escrita pelo apostador. Extraia os dados da aposta.\n\n"
+        "às vezes junto com uma legenda escrita pelo apostador. Extraia os dados da(s) aposta(s).\n\n"
+        "Sobre QUANTIDADE: o print pode conter MAIS DE UMA aposta separada e independente — por "
+        "exemplo, várias entradas empilhadas na tela, cada uma com sua própria odd/stake, ou vários "
+        "tips distintos mandados de uma vez. Nesse caso, retorne um item da lista pra CADA aposta "
+        "detectada. Isso é diferente de uma aposta MÚLTIPLA (várias seleções combinadas numa odd só, "
+        "tipo um bilhete 'combo') — isso é UMA aposta só: retorne um único item, com as seleções "
+        "resumidas na descrição e esporte '🎯 Múltipla' se fizer sentido. Na dúvida entre as duas "
+        "leituras, olhe se cada linha do print tem odd/stake PRÓPRIOS (várias apostas) ou se é um "
+        "odd/stake ÚNICO cobrindo todas as seleções junto (uma múltipla só).\n\n"
         "Sobre ODD: em apostas de 'aumento' (odd boost), o número que aparece em destaque no "
         "bilhete pode ser a odd ORIGINAL, e a odd de verdade (já aumentada) aparece escrita na "
         "descrição/legenda do texto (ex: 'aumentada para 2.50', 'boost 3.00'). Quando isso "
@@ -587,7 +596,8 @@ def extrair_aposta_via_ia(legenda: str, foto_bytes):
         "só então converta pra Brasília subtraindo/somando as horas corretas — não assuma que o "
         "horário encontrado já está em Brasília. Se tiver qualquer dúvida sobre o fuso da fonte, "
         "prefira uma fonte que declare o fuso explicitamente. Só use a data de hoje como último "
-        "recurso, se a busca não encontrar nada.\n\n"
+        "recurso, se a busca não encontrar nada. Se forem várias apostas com jogos diferentes, "
+        "pesquise a data/horário de cada uma separadamente.\n\n"
         "Sobre STAKE (valor apostado): pode aparecer de duas formas.\n"
         "1) Um valor em R$ já pronto (ex: 'R$ 50,00') — use esse valor direto.\n"
         "2) Um número seguido de '%' ou 'u' (ex: '2%', '1u', '1.5u') — isso NÃO é porcentagem de "
@@ -600,9 +610,10 @@ def extrair_aposta_via_ia(legenda: str, foto_bytes):
         "desse limite, NÃO use o valor indicado — use o valor do limite. Ou seja, o limite sempre "
         "vence quando for menor que o valor calculado normalmente.\n\n"
         "Depois de pesquisar (se precisar), sua resposta final deve conter SOMENTE um JSON válido "
-        "(sem texto antes/depois, sem cerca de markdown), neste formato exato:\n"
-        '{"descricao": "...", "odd": 0.0, "stake": 0.0, "casa": "...", "esporte": "...", '
-        '"data": "YYYY-MM-DD", "horario": "HH:MM ou null"}\n\n'
+        "(sem texto antes/depois, sem cerca de markdown) — um ARRAY, mesmo que só tenha 1 aposta, "
+        "neste formato exato:\n"
+        '[{"descricao": "...", "odd": 0.0, "stake": 0.0, "casa": "...", "esporte": "...", '
+        '"data": "YYYY-MM-DD", "horario": "HH:MM ou null"}]\n\n'
         f"Casas conhecidas (use uma dessas se reconhecer; senão, o nome exato que aparecer no print): "
         f"{', '.join(CASAS)}\n"
         f"Esportes conhecidos (idem): {esportes_nomes}\n"
@@ -629,8 +640,8 @@ def extrair_aposta_via_ia(legenda: str, foto_bytes):
 
     resp = client.messages.create(
         model="claude-haiku-4-5-20251001",
-        max_tokens=1200,
-        tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 3}],
+        max_tokens=2000,
+        tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 6}],
         messages=[{"role": "user", "content": content}],
     )
     blocos_texto = [b.text for b in resp.content if getattr(b, "type", None) == "text"]
@@ -638,31 +649,38 @@ def extrair_aposta_via_ia(legenda: str, foto_bytes):
     texto = texto.strip("`").strip()
     if texto.lower().startswith("json"):
         texto = texto[4:].strip()
-    m = re.search(r"\{.*\}", texto, re.DOTALL)
+    m = re.search(r"\[.*\]", texto, re.DOTALL)
     if m:
         texto = m.group(0)
-    dados = json.loads(texto)
+    lista = json.loads(texto)
+    if isinstance(lista, dict):
+        lista = [lista]  # segurança, caso a IA devolva um objeto solto em vez de array
+    if not lista:
+        raise ValueError("não detectei nenhuma aposta nesse print.")
 
-    dados["casa"]    = normalizar_casa(str(dados.get("casa") or "Outra"))
-    dados["esporte"] = normalizar_esporte(str(dados.get("esporte") or "Outro"))
-    try:
-        dados["odd"] = float(dados["odd"])
-    except (TypeError, ValueError):
-        raise ValueError("não consegui identificar a *odd* nessa aposta.")
-    try:
-        dados["stake"] = float(dados["stake"])
-    except (TypeError, ValueError):
-        raise ValueError(
-            "não consegui identificar o *valor apostado*. Se o print usa uma notação tipo "
-            "\"2%\" ou \"2u\" (unidades) sem valor em R$ visível, confere se a legenda ou a "
-            "imagem deixam isso claro — senão lança essa aposta manualmente."
-        )
-    dados["descricao"] = str(dados.get("descricao") or "").strip() or "(sem descrição)"
-    if not dados.get("data"):
-        dados["data"] = hoje
-    if not dados.get("horario"):
-        dados["horario"] = ""
-    return dados
+    apostas = []
+    for i, dados in enumerate(lista, start=1):
+        dados["casa"]    = normalizar_casa(str(dados.get("casa") or "Outra"))
+        dados["esporte"] = normalizar_esporte(str(dados.get("esporte") or "Outro"))
+        try:
+            dados["odd"] = float(dados["odd"])
+        except (TypeError, ValueError):
+            raise ValueError(f"não consegui identificar a *odd* da aposta {i} do print.")
+        try:
+            dados["stake"] = float(dados["stake"])
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"não consegui identificar o *valor apostado* da aposta {i} do print. Se o print "
+                "usa uma notação tipo \"2%\" ou \"2u\" (unidades) sem valor em R$ visível, confere "
+                "se a legenda ou a imagem deixam isso claro — senão lança essa aposta manualmente."
+            )
+        dados["descricao"] = str(dados.get("descricao") or "").strip() or "(sem descrição)"
+        if not dados.get("data"):
+            dados["data"] = hoje
+        if not dados.get("horario"):
+            dados["horario"] = ""
+        apostas.append(dados)
+    return apostas
 
 async def receber_encaminhada(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Handler de nível superior (fora de qualquer conversa): quando chega uma
@@ -680,7 +698,7 @@ async def receber_encaminhada(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     aviso = await msg.reply_text("Lendo a aposta...")
     try:
-        dados = extrair_aposta_via_ia(legenda, foto_bytes)
+        apostas = extrair_apostas_via_ia(legenda, foto_bytes)
     except Exception as e:
         logging.exception("Falha ao extrair aposta via IA")
         texto_erro = f"❌ Não consegui ler essa aposta automaticamente: {e}"
@@ -690,18 +708,30 @@ async def receber_encaminhada(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await aviso.edit_text(texto_erro.replace("*", ""))
         return
 
-    ctx.user_data["ia_pendente"] = dados
-    data_fmt = datetime.strptime(dados["data"], "%Y-%m-%d").strftime("%d/%m/%Y")
-    hora_txt = f" às {dados['horario']}" if dados.get("horario") else ""
-    preview = (
-        f"*Aposta detectada:*\n\n"
-        f"📅 {data_fmt}{hora_txt}\n🏅 {esc_md(dados['esporte'])}\n"
-        f"🏷 {esc_md(dados['descricao'])}\n🔢 Odd: {dados['odd']:g}\n"
-        f"💰 Stake: R$ {dados['stake']:.2f}\n🏦 Casa: {esc_md(dados['casa'])}\n\n"
-        f"Confirma?"
-    )
+    ctx.user_data["ia_pendente"] = apostas
+
+    def _bloco(dados, numero=None):
+        data_fmt = datetime.strptime(dados["data"], "%Y-%m-%d").strftime("%d/%m/%Y")
+        hora_txt = f" às {dados['horario']}" if dados.get("horario") else ""
+        prefixo = f"*Aposta {numero}*\n" if numero else ""
+        return (
+            f"{prefixo}📅 {data_fmt}{hora_txt}\n🏅 {esc_md(dados['esporte'])}\n"
+            f"🏷 {esc_md(dados['descricao'])}\n🔢 Odd: {dados['odd']:g}\n"
+            f"💰 Stake: R$ {dados['stake']:.2f}\n🏦 Casa: {esc_md(dados['casa'])}"
+        )
+
+    if len(apostas) == 1:
+        titulo = "*Aposta detectada:*\n\n"
+        corpo = _bloco(apostas[0])
+        botao_salvar = "✅ Salvar"
+    else:
+        titulo = f"*{len(apostas)} apostas detectadas nesse print:*\n\n"
+        corpo = "\n\n".join(_bloco(a, i) for i, a in enumerate(apostas, start=1))
+        botao_salvar = f"✅ Salvar todas ({len(apostas)})"
+
+    preview = f"{titulo}{corpo}\n\nConfirma?"
     teclado = InlineKeyboardMarkup([[
-        InlineKeyboardButton("✅ Salvar", callback_data="ia_salvar"),
+        InlineKeyboardButton(botao_salvar, callback_data="ia_salvar"),
         InlineKeyboardButton("❌ Descartar", callback_data="ia_descartar"),
     ]])
     try:
@@ -710,21 +740,38 @@ async def receber_encaminhada(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await aviso.edit_text(preview.replace("*", ""), reply_markup=teclado)
 
 async def ia_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Processa o clique em Salvar/Descartar do preview gerado pela IA."""
+    """Processa o clique em Salvar/Descartar do preview gerado pela IA.
+    Salva uma ou várias apostas de uma vez, dependendo do que foi detectado."""
     query = update.callback_query
     await query.answer()
-    dados = ctx.user_data.pop("ia_pendente", None)
-    if query.data == "ia_descartar" or not dados:
+    apostas = ctx.user_data.pop("ia_pendente", None)
+    if query.data == "ia_descartar" or not apostas:
         await query.edit_message_text("❌ Descartado.")
         return
-    dados["resultado"] = "pendente"
-    dados["freebet"] = 0
-    try:
-        new_id = inserir(dados)
-        await query.edit_message_text(f"✅ Aposta #{new_id} salva a partir do print!")
-    except Exception as e:
-        logging.exception("Falha ao salvar aposta extraída via IA")
-        await query.edit_message_text(f"❌ Erro ao salvar: {e}")
+
+    salvas, erros = [], []
+    for dados in apostas:
+        dados["resultado"] = "pendente"
+        dados["freebet"] = 0
+        try:
+            salvas.append(inserir(dados))
+        except Exception as e:
+            logging.exception("Falha ao salvar aposta extraída via IA")
+            erros.append(str(e))
+
+    if len(apostas) == 1:
+        if salvas:
+            await query.edit_message_text(f"✅ Aposta #{salvas[0]} salva a partir do print!")
+        else:
+            await query.edit_message_text(f"❌ Erro ao salvar: {erros[0]}")
+        return
+
+    partes = []
+    if salvas:
+        partes.append("✅ Salvas: " + ", ".join(f"#{i}" for i in salvas))
+    if erros:
+        partes.append(f"❌ {len(erros)} falharam: " + "; ".join(erros))
+    await query.edit_message_text("\n".join(partes))
 
 def lucro_aposta(a):
     stake   = float(a["stake"])

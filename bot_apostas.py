@@ -63,7 +63,11 @@ def remover_casa_limitada(casa):
 
 def get_casas_ordenadas(n=13):
     """Retorna as n casas mais usadas no banco + 'Outra' no final, excluindo casas limitadas."""
-    limitadas = set(get_casas_limitadas())
+    # Comparação case-insensitive: casas antigas no banco podem estar com grafia
+    # diferente (ex: "Rei do Pitaco") da que foi salva em casas_limitadas
+    # (ex: "Rei Do Pitaco", gerado por .title()), então comparar direto fazia
+    # a casa "escapar" do filtro.
+    limitadas_lower = set(c.lower() for c in get_casas_limitadas())
     try:
         with conectar() as conn:
             with conn.cursor() as cur:
@@ -76,15 +80,15 @@ def get_casas_ordenadas(n=13):
                     LIMIT %s
                 """, (n,))
                 rows = cur.fetchall()
-        top = [r[0] for r in rows if r[0] and r[0] != "Outra" and r[0] not in limitadas][:n]
+        top = [r[0] for r in rows if r[0] and r[0] != "Outra" and r[0].lower() not in limitadas_lower][:n]
         # Garante que casas conhecidas mas não no banco apareçam se necessário
         if len(top) < n:
             for c in CASAS:
-                if c not in top and c != "Outra" and c not in limitadas and len(top) < n:
+                if c not in top and c != "Outra" and c.lower() not in limitadas_lower and len(top) < n:
                     top.append(c)
         return top + ["Outra"]
     except Exception:
-        return [c for c in CASAS if c not in limitadas]
+        return [c for c in CASAS if c.lower() not in limitadas_lower]
 
 # Mapeamento para normalizar casas antigas/variantes para o nome atual
 MAPA_CASAS_GEMEAS = {
@@ -95,10 +99,9 @@ MAPA_CASAS_GEMEAS = {
     "Vdb":            "Vaidebet",
     "VDB":            "Vaidebet",
     # Rei do Pitaco
-    "pitaco":         "Rei do Pitaco",
-    "Pitaco":         "Rei do Pitaco",
-    "Rei Do Pitaco":  "Rei do Pitaco",
-    "rei do pitaco":  "Rei do Pitaco",
+    "pitaco":         "Rei Do Pitaco",
+    "Pitaco":         "Rei Do Pitaco",
+    "Rei do Pitaco":  "Rei Do Pitaco",
     # Donaldbet/Bet.bet
     "donaldbet":                                      "Donaldbet/Bet.bet",
     "Donaldbet":                                      "Donaldbet/Bet.bet",
@@ -132,8 +135,6 @@ MAPA_CASAS_GEMEAS = {
     # Bolsa De Apostas (singular)
     "Bolsa De Aposta": "Bolsa De Apostas",
 
-    # Rei Do Pitaco (canonical e maiusculo)
-    "Rei do Pitaco":   "Rei Do Pitaco",
     "rei do pitaco":   "Rei Do Pitaco",
 
     # Betpix365 (abreviacao)
@@ -1910,7 +1911,19 @@ async def limitacoes_resposta(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return await config_inicio(update, ctx)
     if txt == "➕ Adicionar Casa":
         casas_limitadas = get_casas_limitadas()
-        teclado = [[c] for c in CASAS if c != "Outra" and c not in casas_limitadas]
+        limitadas_lower = set(c.lower() for c in casas_limitadas)
+        # Junta a lista fixa com as casas que já apareceram em apostas reais,
+        # pra casas como "Rei do Pitaco" (que não está em CASAS) também aparecerem prontas.
+        casas_usadas = set()
+        try:
+            with conectar() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT DISTINCT casa FROM apostas WHERE casa IS NOT NULL AND casa != ''")
+                    casas_usadas = {r[0] for r in cur.fetchall()}
+        except Exception:
+            pass
+        todas_casas = sorted(set(c for c in CASAS if c != "Outra") | casas_usadas)
+        teclado = [[c] for c in todas_casas if c.lower() not in limitadas_lower]
         teclado.append([CANCELAR_BTN])
         await update.message.reply_text(
             "🏦 *Qual casa você está limitado?*\nEscolha da lista ou digite o nome:",
@@ -1933,7 +1946,21 @@ async def limitacoes_add_receber(update: Update, ctx: ContextTypes.DEFAULT_TYPE)
     txt = update.message.text.strip()
     if txt == CANCELAR_BTN:
         return await limitacoes_inicio(update, ctx)
+    # Se a casa digitada já existe (em CASAS ou já usada em alguma aposta, mesmo
+    # com grafia diferente), usa a grafia já existente pra manter consistência.
     casa = txt if txt in CASAS else txt.title()
+    try:
+        with conectar() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT DISTINCT casa FROM apostas WHERE casa IS NOT NULL AND lower(casa)=lower(%s) LIMIT 1",
+                    (txt,)
+                )
+                row = cur.fetchone()
+                if row:
+                    casa = row[0]
+    except Exception:
+        pass
     adicionar_casa_limitada(casa)
     await update.message.reply_text(
         f"🚫 *{esc_md(casa)}* adicionada às limitações.\nEla não vai mais aparecer nas opções de nova aposta.",

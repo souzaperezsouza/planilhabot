@@ -36,8 +36,34 @@ CASAS = [
     "Faz1Bet","Outra"
 ]
 
+def get_casas_limitadas():
+    """Retorna a lista de casas marcadas como limitadas (não aparecem nas opções de nova aposta)."""
+    try:
+        with conectar() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT casa FROM casas_limitadas ORDER BY casa")
+                return [r[0] for r in cur.fetchall()]
+    except Exception:
+        return []
+
+def adicionar_casa_limitada(casa):
+    with conectar() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO casas_limitadas (casa) VALUES (%s) ON CONFLICT (casa) DO NOTHING",
+                (casa,)
+            )
+        conn.commit()
+
+def remover_casa_limitada(casa):
+    with conectar() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM casas_limitadas WHERE casa=%s", (casa,))
+        conn.commit()
+
 def get_casas_ordenadas(n=13):
-    """Retorna as n casas mais usadas no banco + 'Outra' no final."""
+    """Retorna as n casas mais usadas no banco + 'Outra' no final, excluindo casas limitadas."""
+    limitadas = set(get_casas_limitadas())
     try:
         with conectar() as conn:
             with conn.cursor() as cur:
@@ -50,15 +76,15 @@ def get_casas_ordenadas(n=13):
                     LIMIT %s
                 """, (n,))
                 rows = cur.fetchall()
-        top = [r[0] for r in rows if r[0] and r[0] != "Outra"][:n]
+        top = [r[0] for r in rows if r[0] and r[0] != "Outra" and r[0] not in limitadas][:n]
         # Garante que casas conhecidas mas não no banco apareçam se necessário
         if len(top) < n:
             for c in CASAS:
-                if c not in top and c != "Outra" and len(top) < n:
+                if c not in top and c != "Outra" and c not in limitadas and len(top) < n:
                     top.append(c)
         return top + ["Outra"]
     except Exception:
-        return CASAS
+        return [c for c in CASAS if c not in limitadas]
 
 # Mapeamento para normalizar casas antigas/variantes para o nome atual
 MAPA_CASAS_GEMEAS = {
@@ -166,6 +192,7 @@ MUDAR_UNIDADE_VALOR                                 = 14
 RESULTADOS_MENU                                     = 15
 GERAR_MENU                                          = 16
 CONFIG_MENU, GASTOS_MENU, GASTO_DESCRICAO, GASTO_VALOR = range(17, 21)
+LIMITACOES_MENU, LIMITACOES_ADD                         = range(21, 23)
 
 CANCELAR_BTN = "❌ Cancelar"
 VOLTAR_BTN   = "⬅️ Voltar"
@@ -202,8 +229,15 @@ def teclado_gerar():
 def teclado_config():
     return ReplyKeyboardMarkup([
         ["💲 Mudar Unidade", "💸 Gastos"],
+        ["🚫 Limitações"],
         ["🔙 Voltar"],
     ], resize_keyboard=True)
+
+def teclado_limitacoes(casas_limitadas):
+    linhas = [[c] for c in casas_limitadas]
+    linhas.append(["➕ Adicionar Casa"])
+    linhas.append(["🔙 Voltar"])
+    return ReplyKeyboardMarkup(linhas, resize_keyboard=True)
 
 def teclado_gastos():
     return ReplyKeyboardMarkup([
@@ -257,6 +291,11 @@ def inicializar_db():
                     data      DATE NOT NULL,
                     descricao TEXT NOT NULL,
                     valor     NUMERIC(10,2) NOT NULL
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS casas_limitadas (
+                    casa VARCHAR(50) PRIMARY KEY
                 )
             """)
         conn.commit()
@@ -1782,6 +1821,8 @@ async def config_resposta(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return await mudar_unidade_inicio(update, ctx)
     if txt == "💸 Gastos":
         return await gastos_menu(update, ctx)
+    if txt == "🚫 Limitações":
+        return await limitacoes_inicio(update, ctx)
     await update.message.reply_text("❓ Use os botões abaixo.", reply_markup=teclado_config())
     return CONFIG_MENU
 
@@ -1842,6 +1883,63 @@ async def receber_gasto_valor(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
     return await gastos_menu(update, ctx)
+
+# ── LIMITAÇÕES ────────────────────────────────────────────────────────────────
+async def limitacoes_inicio(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    casas = get_casas_limitadas()
+    if casas:
+        texto = (
+            "🚫 *Limitações*\n\nCasas em que você está limitado:\n\n"
+            + "\n".join(f"• {esc_md(c)}" for c in casas)
+            + "\n\nToque numa casa para remover da lista, ou adicione uma nova."
+        )
+    else:
+        texto = (
+            "🚫 *Limitações*\n\n"
+            "Você não tem nenhuma casa limitada no momento.\n\n"
+            "Casas limitadas somem das opções ao registrar uma nova aposta."
+        )
+    await update.message.reply_text(
+        texto, reply_markup=teclado_limitacoes(casas), parse_mode="Markdown"
+    )
+    return LIMITACOES_MENU
+
+async def limitacoes_resposta(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    txt = update.message.text.strip()
+    if txt == "🔙 Voltar":
+        return await config_inicio(update, ctx)
+    if txt == "➕ Adicionar Casa":
+        casas_limitadas = get_casas_limitadas()
+        teclado = [[c] for c in CASAS if c != "Outra" and c not in casas_limitadas]
+        teclado.append([CANCELAR_BTN])
+        await update.message.reply_text(
+            "🏦 *Qual casa você está limitado?*\nEscolha da lista ou digite o nome:",
+            reply_markup=ReplyKeyboardMarkup(teclado, resize_keyboard=True, one_time_keyboard=True),
+            parse_mode="Markdown"
+        )
+        return LIMITACOES_ADD
+    casas_limitadas = get_casas_limitadas()
+    if txt in casas_limitadas:
+        remover_casa_limitada(txt)
+        await update.message.reply_text(
+            f"✅ *{esc_md(txt)}* removida das limitações. Ela volta a aparecer nas opções de nova aposta.",
+            parse_mode="Markdown"
+        )
+        return await limitacoes_inicio(update, ctx)
+    await update.message.reply_text("❓ Use os botões abaixo.", reply_markup=teclado_limitacoes(casas_limitadas))
+    return LIMITACOES_MENU
+
+async def limitacoes_add_receber(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    txt = update.message.text.strip()
+    if txt == CANCELAR_BTN:
+        return await limitacoes_inicio(update, ctx)
+    casa = txt if txt in CASAS else txt.title()
+    adicionar_casa_limitada(casa)
+    await update.message.reply_text(
+        f"🚫 *{esc_md(casa)}* adicionada às limitações.\nEla não vai mais aparecer nas opções de nova aposta.",
+        parse_mode="Markdown"
+    )
+    return await limitacoes_inicio(update, ctx)
 
 # ── GERAR MENU ────────────────────────────────────────────────────────────────
 async def gerar_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -3277,6 +3375,8 @@ def main():
             GASTOS_MENU:          [MessageHandler(filters.TEXT & ~filters.COMMAND, gastos_resposta)],
             GASTO_DESCRICAO:      [MessageHandler(filters.TEXT & ~filters.COMMAND, receber_gasto_descricao)],
             GASTO_VALOR:          [MessageHandler(filters.TEXT & ~filters.COMMAND, receber_gasto_valor)],
+            LIMITACOES_MENU:      [MessageHandler(filters.TEXT & ~filters.COMMAND, limitacoes_resposta)],
+            LIMITACOES_ADD:       [MessageHandler(filters.TEXT & ~filters.COMMAND, limitacoes_add_receber)],
         },
         fallbacks=fallbacks_padrao,
     )

@@ -33,7 +33,7 @@ CASAS = [
     "BETesporte","BetFair","Novibet","Esportivabet","Betnacional",
     "Vupi","Goldebet/Lotogreen","Pagol","Versus","Kto",
     "4Win","Donaldbet/Bet.bet","Vivasorte","Esportes Da Sorte","Stake",
-    "Faz1Bet","Outra"
+    "Faz1Bet","EstrelaBet","Outra"
 ]
 
 def get_casas_limitadas():
@@ -76,11 +76,25 @@ def get_casas_ordenadas(n=13):
                     FROM apostas
                     WHERE casa IS NOT NULL AND casa != ''
                     GROUP BY casa
-                    ORDER BY total DESC
-                    LIMIT %s
-                """, (n,))
+                """)
                 rows = cur.fetchall()
-        top = [r[0] for r in rows if r[0] and r[0] != "Outra" and r[0].lower() not in limitadas_lower][:n]
+        # Agrupa por nome NORMALIZADO antes de ordenar: grafias diferentes da
+        # mesma casa (ex: "BETesporte" vs "Betesporte") não podem competir por
+        # espaço separadamente, senão a contagem real fica fragmentada e a
+        # ordem por "casa que eu mais aposto" sai errada. Também não dá mais
+        # LIMIT direto na query, porque cortar antes de filtrar as limitadas
+        # deixava só sobras aleatórias (ordem do array CASAS) pra preencher
+        # os espaços vagos, em vez das próximas casas mais usadas de verdade.
+        contagem = {}
+        for casa_raw, total in rows:
+            if not casa_raw:
+                continue
+            nome = normalizar_casa(casa_raw)
+            if nome == "Outra":
+                continue
+            contagem[nome] = contagem.get(nome, 0) + total
+        ordenadas = sorted(contagem.items(), key=lambda x: x[1], reverse=True)
+        top = [nome for nome, _ in ordenadas if nome.lower() not in limitadas_lower][:n]
         # Garante que casas conhecidas mas não no banco apareçam se necessário
         if len(top) < n:
             for c in CASAS:
@@ -147,6 +161,16 @@ MAPA_CASAS_GEMEAS = {
     "Betfair":         "BetFair",
     "betfair":         "BetFair",
     "BETFAIR":         "BetFair",
+
+    # BETesporte (variacao de capitalizacao - grafia oficial é "BETesporte")
+    "Betesporte":      "BETesporte",
+    "betesporte":      "BETesporte",
+    "BETESPORTE":      "BETesporte",
+
+    # EstrelaBet (nome abreviado/digitado errado)
+    "Estrela":         "EstrelaBet",
+    "estrela":         "EstrelaBet",
+    "estrelabet":      "EstrelaBet",
 }
 
 ESPORTES = ["⚽ Futebol","🏀 Basquete","🎾 Tênis","🏒 Hóquei",

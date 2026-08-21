@@ -171,6 +171,11 @@ MAPA_CASAS_GEMEAS = {
     "Estrela":         "EstrelaBet",
     "estrela":         "EstrelaBet",
     "estrelabet":      "EstrelaBet",
+
+    # Esportes Da Sorte (abreviacao)
+    "eds":             "Esportes Da Sorte",
+    "Eds":             "Esportes Da Sorte",
+    "EDS":             "Esportes Da Sorte",
 }
 
 ESPORTES = ["⚽ Futebol","🏀 Basquete","🎾 Tênis","🏒 Hóquei",

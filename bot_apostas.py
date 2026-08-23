@@ -31,7 +31,7 @@ BANCA_INICIAL = 5000
 CASAS = [
     "Bet365","Betano","SportingBet","Betboo","Vaidebet","Betpix365","Lottu",
     "BETesporte","BetFair","Novibet","Esportivabet","Betnacional",
-    "Vupi","Goldebet/Lotogreen","Pagol","Versus","Kto",
+    "Vupi","Goldebet","Lotogreen","Pagol","Versus","Kto",
     "4Win","Donaldbet/Bet.bet","Vivasorte","Esportes Da Sorte","Stake",
     "Faz1Bet","EstrelaBet","Outra"
 ]
@@ -176,6 +176,11 @@ MAPA_CASAS_GEMEAS = {
     "eds":             "Esportes Da Sorte",
     "Eds":             "Esportes Da Sorte",
     "EDS":             "Esportes Da Sorte",
+
+    # Goldebet (grafia separada "Gol de Bet") - casa propria, distinta da Lotogreen
+    "Gol de Bet":      "Goldebet",
+    "gol de bet":      "Goldebet",
+    "goldebet":        "Goldebet",
 }
 
 ESPORTES = ["⚽ Futebol","🏀 Basquete","🎾 Tênis","🏒 Hóquei",

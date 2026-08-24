@@ -973,6 +973,22 @@ def eh_cashout(a):
     """Retorna True se a aposta void foi um cashout (tem cashout_valor > 0)."""
     return a["resultado"] == "void" and float(a.get("cashout_valor") or 0) > 0
 
+def pico_e_fundo(apostas):
+    """Percorre as apostas em ordem cronológica somando o lucro acumulado e
+    retorna (pico, fundo): o máximo e o mínimo que esse acumulado chegou a
+    atingir em algum momento (começando de 0). Ex: se o saldo do período
+    nunca ficou negativo, fundo = 0; se nunca ficou positivo, pico = 0.
+    Isso é diferente da aposta de maior/menor lucro isolada."""
+    ordenadas = sorted(apostas, key=lambda a: (str(a["data"]), a.get("horario") or "", int(a["id"])))
+    acumulado = 0.0
+    pico = 0.0
+    fundo = 0.0
+    for a in ordenadas:
+        acumulado += lucro_aposta(a)
+        pico  = max(pico, acumulado)
+        fundo = min(fundo, acumulado)
+    return pico, fundo
+
 LIMITE_TELEGRAM = 3500  # margem de segurança abaixo do limite real (4096)
 
 def paginar_linhas(linhas, limite=LIMITE_TELEGRAM):
@@ -1592,12 +1608,11 @@ async def resultados_dia(update: Update, ctx: ContextTypes.DEFAULT_TYPE, raw: st
     resumo_str = f"{g}V {p}D"
     if co: resumo_str += f" {co}CO"
     if vo: resumo_str += f" {vo}Void"
-    maior_ap = max(do_dia, key=lambda a: lucro_aposta(a))
-    menor_ap = min(do_dia, key=lambda a: lucro_aposta(a))
+    pico_dia, fundo_dia = pico_e_fundo(do_dia)
     linhas = [
         f"{emoji} *{data_obj.strftime('%d/%m/%Y')}* — {resumo_str} — {sinal}R$ {lucro_dia:.2f} ({lucro_dia_u:+.2f}u)\n"
         f"📊 Média/aposta: R$ {media_dia:.2f} | ROI do dia: {roi_dia:+.1%}\n"
-        f"🔝 Máxima do dia: *#{maior_ap['id']}* +R$ {lucro_aposta(maior_ap):.2f} | 🔻 Mínima do dia: *#{menor_ap['id']}* R$ {lucro_aposta(menor_ap):.2f}\n"
+        f"🔝 Máxima do dia: *+R$ {pico_dia:.2f}* | 🔻 Mínima do dia: *R$ {fundo_dia:.2f}*\n"
     ]
     emojis_res = {"ganhou":"✅","perdeu":"❌"}
     for a in do_dia:
@@ -1643,12 +1658,11 @@ async def resultados_por_casa_detalhe(update: Update, ctx: ContextTypes.DEFAULT_
     sinal_c   = "+" if lucro_c >= 0 else ""
 
     nome_exib = normalizar_casa(do_casa[0].get("casa") or nome_casa)
-    maior_c = max(do_casa, key=lambda a: lucro_aposta(a))
-    menor_c = min(do_casa, key=lambda a: lucro_aposta(a))
+    pico_c, fundo_c = pico_e_fundo(do_casa)
     linhas = [
         f"🏦 *{nome_exib}* — {len(do_casa)} apostas",
         f"{emoji_c} Lucro: *{sinal_c}R$ {lucro_c:.2f}* ({lucro_u_c:+.2f}u) | ROI: {roi_c:+.1%} | {g_c}V/{len(do_casa)-g_c}D",
-        f"🔝 Máximo histórico: *#{maior_c['id']}* +R$ {lucro_aposta(maior_c):.2f} | 🔻 Mínimo histórico: *#{menor_c['id']}* R$ {lucro_aposta(menor_c):.2f}\n"
+        f"🔝 Máximo histórico: *+R$ {pico_c:.2f}* | 🔻 Mínimo histórico: *R$ {fundo_c:.2f}*\n"
     ]
 
     emojis_res = {"ganhou":"✅","perdeu":"❌","void":"↩️","pendente":"⏳"}
@@ -1740,11 +1754,10 @@ async def editar_inicio(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                    and (a["resultado"] in ("ganhou","perdeu") or eh_cashout(a))]
     linha_hoje  = ""
     if res_hoje:
-        maior_hoje = max(res_hoje, key=lambda a: lucro_aposta(a))
-        menor_hoje = min(res_hoje, key=lambda a: lucro_aposta(a))
+        pico_hoje, fundo_hoje = pico_e_fundo(res_hoje)
         linha_hoje = (
-            f"\n🔝 Maior ganho hoje: *#{maior_hoje['id']}* +R$ {lucro_aposta(maior_hoje):.2f} | "
-            f"🔻 Maior perda hoje: *#{menor_hoje['id']}* R$ {lucro_aposta(menor_hoje):.2f}"
+            f"\n🔝 Máxima de hoje: *+R$ {pico_hoje:.2f}* | "
+            f"🔻 Mínima de hoje: *R$ {fundo_hoje:.2f}*"
         )
 
     if not todas:

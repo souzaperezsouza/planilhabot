@@ -1612,7 +1612,7 @@ async def resultados_dia(update: Update, ctx: ContextTypes.DEFAULT_TYPE, raw: st
     linhas = [
         f"{emoji} *{data_obj.strftime('%d/%m/%Y')}* — {resumo_str} — {sinal}R$ {lucro_dia:.2f} ({lucro_dia_u:+.2f}u)\n"
         f"📊 Média/aposta: R$ {media_dia:.2f} | ROI do dia: {roi_dia:+.1%}\n"
-        f"🔝 Máxima do dia: *+R$ {pico_dia:.2f}* | 🔻 Mínima do dia: *R$ {fundo_dia:.2f}*\n"
+        f"🔝 Máxima do dia: *+R$ {pico_dia:.2f}*\n🔻 Mínima do dia: *R$ {fundo_dia:.2f}*\n"
     ]
     emojis_res = {"ganhou":"✅","perdeu":"❌"}
     for a in do_dia:
@@ -1662,7 +1662,7 @@ async def resultados_por_casa_detalhe(update: Update, ctx: ContextTypes.DEFAULT_
     linhas = [
         f"🏦 *{nome_exib}* — {len(do_casa)} apostas",
         f"{emoji_c} Lucro: *{sinal_c}R$ {lucro_c:.2f}* ({lucro_u_c:+.2f}u) | ROI: {roi_c:+.1%} | {g_c}V/{len(do_casa)-g_c}D",
-        f"🔝 Máximo histórico: *+R$ {pico_c:.2f}* | 🔻 Mínimo histórico: *R$ {fundo_c:.2f}*\n"
+        f"🔝 Máximo histórico: *+R$ {pico_c:.2f}*\n🔻 Mínimo histórico: *R$ {fundo_c:.2f}*\n"
     ]
 
     emojis_res = {"ganhou":"✅","perdeu":"❌","void":"↩️","pendente":"⏳"}
@@ -1752,12 +1752,28 @@ async def editar_inicio(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     hoje_str    = datetime.now().strftime("%Y-%m-%d")
     res_hoje    = [a for a in apostas if str(a["data"])[:10] == hoje_str
                    and (a["resultado"] in ("ganhou","perdeu") or eh_cashout(a))]
+    pendentes_hoje = [a for a in pendentes if str(a["data"])[:10] == hoje_str]
     linha_hoje  = ""
-    if res_hoje:
-        pico_hoje, fundo_hoje = pico_e_fundo(res_hoje)
+    if res_hoje or pendentes_hoje:
+        lucro_resolvido_hoje = sum(lucro_aposta(a) for a in res_hoje)
+
+        def _potencial_win(a):
+            return float(a["stake"]) * (float(a["odd"]) - 1)
+
+        def _potencial_loss(a):
+            stake   = float(a["stake"])
+            try:
+                freebet = float(a.get("freebet") or 0)
+            except Exception:
+                freebet = 0.0
+            freebet = min(freebet, stake)
+            return -(stake - freebet)
+
+        maxima_hoje = lucro_resolvido_hoje + sum(_potencial_win(a) for a in pendentes_hoje)
+        minima_hoje = lucro_resolvido_hoje + sum(_potencial_loss(a) for a in pendentes_hoje)
         linha_hoje = (
-            f"\n🔝 Máxima de hoje: *+R$ {pico_hoje:.2f}* | "
-            f"🔻 Mínima de hoje: *R$ {fundo_hoje:.2f}*"
+            f"\n🔝 Máxima possível hoje (se todas baterem): *+R$ {maxima_hoje:.2f}*"
+            f"\n🔻 Mínima possível hoje (se todas perderem): *R$ {minima_hoje:.2f}*"
         )
 
     if not todas:

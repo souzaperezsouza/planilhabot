@@ -228,6 +228,7 @@ RESULTADOS_MENU                                     = 15
 GERAR_MENU                                          = 16
 CONFIG_MENU, GASTOS_MENU, GASTO_DESCRICAO, GASTO_VALOR = range(17, 21)
 LIMITACOES_MENU, LIMITACOES_ADD                         = range(21, 23)
+DUPLICAR_DESC_AGUARDA                                    = 23
 
 CANCELAR_BTN = "❌ Cancelar"
 VOLTAR_BTN   = "⬅️ Voltar"
@@ -251,7 +252,8 @@ def teclado_cancelar_voltar():
 def teclado_resultados():
     return ReplyKeyboardMarkup([
         ["🏦 Por Casa", "🏅 Por Esporte"],
-        ["📅 Por Mês",  "🔙 Voltar"],
+        ["📅 Por Mês",  "📊 Estatísticas"],
+        ["🔙 Voltar"],
     ], resize_keyboard=True)
 
 def teclado_gerar():
@@ -389,11 +391,45 @@ def duplicar_aposta(id_orig: int):
         conn.commit()
     return aposta, novo_id
 
+def _texto_resumo_aposta(id_orig, aposta, novo_id, titulo):
+    data_fmt = aposta["data"].strftime("%d/%m/%Y") if hasattr(aposta["data"], "strftime") else str(aposta["data"])[:10]
+    hora_txt = f' às {aposta["horario"]}' if aposta.get("horario") else ""
+    res_txt = {"ganhou": "Green ✅", "perdeu": "Red ❌", "void": "Void ↩️", "pendente": "Pendente ⏳"}.get(aposta["resultado"], aposta["resultado"])
+    return (
+        f"{titulo} #{id_orig} → *#{novo_id}*\n\n"
+        f"📅 {data_fmt}{hora_txt}\n"
+        f"🏅 {esc_md(aposta.get('esporte') or '')}\n🏷 {esc_md(aposta['descricao'])}\n"
+        f"🔢 Odd: {float(aposta['odd']):g}\n💰 Stake: R$ {float(aposta['stake']):.2f}\n"
+        f"🏦 Casa: {esc_md(aposta.get('casa') or '')}\n📌 Resultado: {res_txt}"
+    )
+
 async def duplicar_comando(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Handler global: qualquer mensagem 'duplicar <id>' cria uma cópia exata
     dessa aposta (mesma data, resultado, odd, stake etc.), independente de
-    qual tela/fluxo o usuário está no momento."""
-    m = re.match(r"(?i)^duplicar\s+(\d+)$", update.message.text.strip())
+    qual tela/fluxo o usuário está no momento. Também aceita
+    'duplicar <id> casa <nome>' para duplicar trocando a casa de aposta."""
+    texto_msg = update.message.text.strip()
+    m_casa = re.match(r"(?i)^duplicar\s+(\d+)\s+casa\s+(.+)$", texto_msg)
+    if m_casa:
+        id_orig    = int(m_casa.group(1))
+        nova_casa  = normalizar_casa(m_casa.group(2).strip())
+        aposta, novo_id = duplicar_aposta(id_orig)
+        if aposta is None:
+            await update.message.reply_text(f"❌ Não achei nenhuma aposta #{id_orig}.")
+            return
+        with conectar() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE apostas SET casa = %s WHERE id = %s", (nova_casa, novo_id))
+            conn.commit()
+        aposta["casa"] = nova_casa
+        texto = _texto_resumo_aposta(id_orig, aposta, novo_id, "✅ Aposta duplicada (casa trocada)")
+        try:
+            await update.message.reply_text(texto, parse_mode="Markdown")
+        except Exception:
+            await update.message.reply_text(texto.replace("*", ""))
+        return
+
+    m = re.match(r"(?i)^duplicar\s+(\d+)$", texto_msg)
     if not m:
         return
     id_orig = int(m.group(1))
@@ -402,20 +438,83 @@ async def duplicar_comando(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Não achei nenhuma aposta #{id_orig}.")
         return
 
-    data_fmt = aposta["data"].strftime("%d/%m/%Y") if hasattr(aposta["data"], "strftime") else str(aposta["data"])[:10]
-    hora_txt = f' às {aposta["horario"]}' if aposta.get("horario") else ""
-    res_txt = {"ganhou": "Green ✅", "perdeu": "Red ❌", "void": "Void ↩️", "pendente": "Pendente ⏳"}.get(aposta["resultado"], aposta["resultado"])
+    texto = _texto_resumo_aposta(id_orig, aposta, novo_id, "✅ Aposta duplicada")
+    try:
+        await update.message.reply_text(texto, parse_mode="Markdown")
+    except Exception:
+        await update.message.reply_text(texto.replace("*", ""))
+
+async def triplicar_comando(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Handler global: 'triplicar <id>' cria duas cópias extras da aposta
+    (a original + 2 novas = 3 no total)."""
+    m = re.match(r"(?i)^triplicar\s+(\d+)$", update.message.text.strip())
+    if not m:
+        return
+    id_orig = int(m.group(1))
+    aposta1, novo_id1 = duplicar_aposta(id_orig)
+    if aposta1 is None:
+        await update.message.reply_text(f"❌ Não achei nenhuma aposta #{id_orig}.")
+        return
+    aposta2, novo_id2 = duplicar_aposta(id_orig)
+
+    data_fmt = aposta1["data"].strftime("%d/%m/%Y") if hasattr(aposta1["data"], "strftime") else str(aposta1["data"])[:10]
+    hora_txt = f' às {aposta1["horario"]}' if aposta1.get("horario") else ""
+    res_txt = {"ganhou": "Green ✅", "perdeu": "Red ❌", "void": "Void ↩️", "pendente": "Pendente ⏳"}.get(aposta1["resultado"], aposta1["resultado"])
     texto = (
-        f"✅ Aposta #{id_orig} duplicada como *#{novo_id}*\n\n"
+        f"✅ Aposta #{id_orig} triplicada → *#{novo_id1}* e *#{novo_id2}*\n\n"
         f"📅 {data_fmt}{hora_txt}\n"
-        f"🏅 {esc_md(aposta.get('esporte') or '')}\n🏷 {esc_md(aposta['descricao'])}\n"
-        f"🔢 Odd: {float(aposta['odd']):g}\n💰 Stake: R$ {float(aposta['stake']):.2f}\n"
-        f"🏦 Casa: {esc_md(aposta.get('casa') or '')}\n📌 Resultado: {res_txt}"
+        f"🏅 {esc_md(aposta1.get('esporte') or '')}\n🏷 {esc_md(aposta1['descricao'])}\n"
+        f"🔢 Odd: {float(aposta1['odd']):g}\n💰 Stake: R$ {float(aposta1['stake']):.2f} (x3)\n"
+        f"🏦 Casa: {esc_md(aposta1.get('casa') or '')}\n📌 Resultado: {res_txt}"
     )
     try:
         await update.message.reply_text(texto, parse_mode="Markdown")
     except Exception:
         await update.message.reply_text(texto.replace("*", ""))
+
+async def duplicar_descricao_inicio(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Entry point de 'duplicar <id> descricao': pede a nova descrição antes
+    de criar a cópia."""
+    m = re.match(r"(?i)^duplicar\s+(\d+)\s+descricao$", update.message.text.strip())
+    id_orig = int(m.group(1))
+    with conectar() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT * FROM apostas WHERE id = %s", (id_orig,))
+            aposta = cur.fetchone()
+    if not aposta:
+        await update.message.reply_text(f"❌ Não achei nenhuma aposta #{id_orig}.")
+        return ConversationHandler.END
+    ctx.user_data["duplicar_desc_id"] = id_orig
+    await update.message.reply_text(
+        f"🏷 Descrição atual: _{esc_md(aposta['descricao'])}_\n\nDigite a nova descrição para a cópia:",
+        reply_markup=ReplyKeyboardMarkup([[CANCELAR_BTN]], resize_keyboard=True),
+        parse_mode="Markdown"
+    )
+    return DUPLICAR_DESC_AGUARDA
+
+async def duplicar_descricao_receber(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if update.message.text.strip() == CANCELAR_BTN:
+        ctx.user_data.pop("duplicar_desc_id", None)
+        return await cancelar(update, ctx)
+    id_orig = ctx.user_data.pop("duplicar_desc_id", None)
+    if id_orig is None:
+        return ConversationHandler.END
+    nova_desc = update.message.text.strip()
+    aposta, novo_id = duplicar_aposta(id_orig)
+    if aposta is None:
+        await update.message.reply_text(f"❌ Não achei nenhuma aposta #{id_orig}.")
+        return ConversationHandler.END
+    with conectar() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE apostas SET descricao = %s WHERE id = %s", (nova_desc, novo_id))
+        conn.commit()
+    aposta["descricao"] = nova_desc
+    texto = _texto_resumo_aposta(id_orig, aposta, novo_id, "✅ Aposta duplicada (descrição trocada)")
+    try:
+        await update.message.reply_text(texto, parse_mode="Markdown")
+    except Exception:
+        await update.message.reply_text(texto.replace("*", ""))
+    return ConversationHandler.END
 
 def inserir(a):
     unidade = get_unidade_atual()
@@ -1255,14 +1354,59 @@ async def resultados(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"{emoji} *Resultados Gerais*\n\n"
         f"💰 Lucro Total: *{sinal}R$ {lucro_total:.2f}* ({lucro_unidades:+.2f}u)\n"
         f"📊 ROI: *{roi:+.1%}* | Progressão: *{progressao:+.2%}*\n"
-        f"📐 Média/aposta: *R$ {lucro_medio:.2f}*\n"
-        f"🏆 {vitorias}V / {len(res)-vitorias}D\n"
-        f"🏦 Capital Atual: *R$ {capital_atual:.2f}*\n"
-        f"⏳ Stake em curso: *R$ {stake_curso:.2f}* ({len(pendentes_ap)} ap) | Possível ganho: *+R$ {possivel_ganho:.2f}*\n\n"
+        f"🏆 {vitorias}V / {len(res)-vitorias}D\n\n"
         f"{emoji_m} {nome_mes_atual}: *{sinal_m}R$ {lucro_mes:.2f}* ({lucro_mes_u:+.2f}u) | {len(res_mes)} ap\n"
         f"{emoji_s} Semana: *{sinal_s}R$ {lucro_semana:.2f}* ({lucro_semana_u:+.2f}u) | {len(res_semana)} ap",
         reply_markup=teclado_resultados(), parse_mode="Markdown"
     )
+    return RESULTADOS_MENU
+
+async def estatisticas(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Mostra métricas complementares que não aparecem em 'Resultados Gerais':
+    stake em curso, possível ganho, média/aposta, capital atual, aposta de
+    maior ganho/perda, melhor/pior dia e odd média."""
+    apostas = carregar()
+    res     = [a for a in apostas if a["resultado"] in ("ganhou","perdeu") or eh_cashout(a)]
+    if not res:
+        await update.message.reply_text("Nenhuma aposta resolvida ainda.", reply_markup=teclado_resultados())
+        return RESULTADOS_MENU
+
+    lucro_total = sum(lucro_aposta(a) for a in res)
+    lucro_medio = lucro_total / len(res) if res else 0
+    pendentes_ap   = [a for a in apostas if a["resultado"] == "pendente"]
+    stake_curso    = sum(float(a["stake"]) for a in pendentes_ap)
+    possivel_ganho = sum(float(a["stake"]) * (float(a["odd"]) - 1) for a in pendentes_ap)
+    capital_atual  = BANCA_INICIAL + lucro_total - stake_curso - total_gastos()
+    odd_media      = sum(float(a["odd"]) for a in res) / len(res)
+
+    melhor_aposta = max(res, key=lambda a: lucro_aposta(a))
+    pior_aposta   = min(res, key=lambda a: lucro_aposta(a))
+
+    def _data_fmt(a):
+        return a["data"].strftime("%d/%m/%Y") if hasattr(a["data"], "strftime") else str(a["data"])[:10]
+
+    # Agrupa lucro por dia pra achar melhor/pior dia
+    lucro_por_dia = {}
+    for a in res:
+        d = _data_fmt(a)
+        lucro_por_dia[d] = lucro_por_dia.get(d, 0) + lucro_aposta(a)
+    melhor_dia, lucro_melhor_dia = max(lucro_por_dia.items(), key=lambda kv: kv[1])
+    pior_dia, lucro_pior_dia     = min(lucro_por_dia.items(), key=lambda kv: kv[1])
+
+    linhas = (
+        f"📊 *Estatísticas*\n\n"
+        f"📐 Média/aposta: *R$ {lucro_medio:.2f}*\n"
+        f"🏦 Capital Atual: *R$ {capital_atual:.2f}*\n"
+        f"⏳ Stake em curso: *R$ {stake_curso:.2f}* ({len(pendentes_ap)} ap) | Possível ganho: *+R$ {possivel_ganho:.2f}*\n"
+        f"🔢 Odd média: *{odd_media:.2f}*\n\n"
+        f"🔝 Maior ganho: *#{melhor_aposta['id']}* {_data_fmt(melhor_aposta)} → +R$ {lucro_aposta(melhor_aposta):.2f}\n"
+        f"_{melhor_aposta['descricao']}_\n\n"
+        f"🔻 Maior perda: *#{pior_aposta['id']}* {_data_fmt(pior_aposta)} → R$ {lucro_aposta(pior_aposta):.2f}\n"
+        f"_{pior_aposta['descricao']}_\n\n"
+        f"🟢 Melhor dia: *{melhor_dia}* → +R$ {lucro_melhor_dia:.2f}\n"
+        f"🔴 Pior dia: *{pior_dia}* → R$ {lucro_pior_dia:.2f}"
+    )
+    await update.message.reply_text(linhas, reply_markup=teclado_resultados(), parse_mode="Markdown")
     return RESULTADOS_MENU
 
 async def resultados_por_casa(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -1448,9 +1592,12 @@ async def resultados_dia(update: Update, ctx: ContextTypes.DEFAULT_TYPE, raw: st
     resumo_str = f"{g}V {p}D"
     if co: resumo_str += f" {co}CO"
     if vo: resumo_str += f" {vo}Void"
+    maior_ap = max(do_dia, key=lambda a: lucro_aposta(a))
+    menor_ap = min(do_dia, key=lambda a: lucro_aposta(a))
     linhas = [
         f"{emoji} *{data_obj.strftime('%d/%m/%Y')}* — {resumo_str} — {sinal}R$ {lucro_dia:.2f} ({lucro_dia_u:+.2f}u)\n"
         f"📊 Média/aposta: R$ {media_dia:.2f} | ROI do dia: {roi_dia:+.1%}\n"
+        f"🔝 Máxima do dia: *#{maior_ap['id']}* +R$ {lucro_aposta(maior_ap):.2f} | 🔻 Mínima do dia: *#{menor_ap['id']}* R$ {lucro_aposta(menor_ap):.2f}\n"
     ]
     emojis_res = {"ganhou":"✅","perdeu":"❌"}
     for a in do_dia:
@@ -1496,9 +1643,12 @@ async def resultados_por_casa_detalhe(update: Update, ctx: ContextTypes.DEFAULT_
     sinal_c   = "+" if lucro_c >= 0 else ""
 
     nome_exib = normalizar_casa(do_casa[0].get("casa") or nome_casa)
+    maior_c = max(do_casa, key=lambda a: lucro_aposta(a))
+    menor_c = min(do_casa, key=lambda a: lucro_aposta(a))
     linhas = [
         f"🏦 *{nome_exib}* — {len(do_casa)} apostas",
-        f"{emoji_c} Lucro: *{sinal_c}R$ {lucro_c:.2f}* ({lucro_u_c:+.2f}u) | ROI: {roi_c:+.1%} | {g_c}V/{len(do_casa)-g_c}D\n"
+        f"{emoji_c} Lucro: *{sinal_c}R$ {lucro_c:.2f}* ({lucro_u_c:+.2f}u) | ROI: {roi_c:+.1%} | {g_c}V/{len(do_casa)-g_c}D",
+        f"🔝 Máximo histórico: *#{maior_c['id']}* +R$ {lucro_aposta(maior_c):.2f} | 🔻 Mínimo histórico: *#{menor_c['id']}* R$ {lucro_aposta(menor_c):.2f}\n"
     ]
 
     emojis_res = {"ganhou":"✅","perdeu":"❌","void":"↩️","pendente":"⏳"}
@@ -1530,6 +1680,8 @@ async def resultados_resposta(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if txt == "🏅 Por Esporte":
         await resultados_por_esporte(update, ctx)
         return RESULTADOS_MENU
+    if txt == "📊 Estatísticas":
+        return await estatisticas(update, ctx)
     # Filtro por nome de mês: "Janeiro", "jan", "Abril/2026", etc.
     txt_lower = txt.strip().lower()
     # Detecta "mes/ano" ou "mes ano" ou só "mes"
@@ -1583,9 +1735,25 @@ async def editar_inicio(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     todas     = sorted(pendentes, key=lambda a: (str(a["data"]), a.get("horario") or "", int(a["id"])))
     ctx.user_data["editar_apostas"] = todas
 
+    hoje_str    = datetime.now().strftime("%Y-%m-%d")
+    res_hoje    = [a for a in apostas if str(a["data"])[:10] == hoje_str
+                   and (a["resultado"] in ("ganhou","perdeu") or eh_cashout(a))]
+    linha_hoje  = ""
+    if res_hoje:
+        maior_hoje = max(res_hoje, key=lambda a: lucro_aposta(a))
+        menor_hoje = min(res_hoje, key=lambda a: lucro_aposta(a))
+        linha_hoje = (
+            f"\n🔝 Maior ganho hoje: *#{maior_hoje['id']}* +R$ {lucro_aposta(maior_hoje):.2f} | "
+            f"🔻 Maior perda hoje: *#{menor_hoje['id']}* R$ {lucro_aposta(menor_hoje):.2f}"
+        )
+
     if not todas:
+        texto = "✅ Nenhuma aposta pendente!"
+        if linha_hoje:
+            texto += linha_hoje
+        texto += "\n\nDigite o *ID* de uma aposta já resolvida para editá-la:"
         await update.message.reply_text(
-            "✅ Nenhuma aposta pendente!\n\nDigite o *ID* de uma aposta já resolvida para editá-la:",
+            texto,
             reply_markup=ReplyKeyboardMarkup([[CANCELAR_BTN]], resize_keyboard=True),
             parse_mode="Markdown"
         )
@@ -1594,7 +1762,9 @@ async def editar_inicio(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     stake_curso    = sum(float(a["stake"]) for a in todas)
     possivel_ganho = sum(float(a["stake"]) * (float(a["odd"]) - 1) for a in todas)
     await update.message.reply_text(
-        f"⏳ Stake em curso: *R$ {stake_curso:.2f}* ({len(todas)} ap) | Possível ganho: *+R$ {possivel_ganho:.2f}*",
+        f"⏳ Stake em curso: *R$ {stake_curso:.2f}* ({len(todas)} ap) | "
+        f"Possível lucro (juntando todas): *+R$ {possivel_ganho:.2f}*"
+        f"{linha_hoje}",
         parse_mode="Markdown"
     )
 
@@ -1619,6 +1789,16 @@ async def editar_navegar(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Digite o número do ID da aposta:")
         return EDITAR_PAGINA
 
+    return await _abrir_edicao_aposta(update, ctx, id_alvo)
+
+async def editar_direto_comando(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Entry point de 'editar <id>': pula a listagem e já abre a aposta pra
+    escolher o campo, de qualquer ponto da conversa."""
+    m = re.match(r"(?i)^editar\s+(\d+)$", update.message.text.strip())
+    id_alvo = int(m.group(1))
+    return await _abrir_edicao_aposta(update, ctx, id_alvo)
+
+async def _abrir_edicao_aposta(update: Update, ctx: ContextTypes.DEFAULT_TYPE, id_alvo: int):
     aposta = buscar_por_id(id_alvo)
     if not aposta:
         await update.message.reply_text("❌ ID não encontrado. Tente outro:")
@@ -3418,7 +3598,10 @@ def main():
     )
 
     conv_editar = ConversationHandler(
-        entry_points=[MessageHandler(filters.Regex("^✏️ Editar aposta$"), editar_inicio)],
+        entry_points=[
+            MessageHandler(filters.Regex("^✏️ Editar aposta$"), editar_inicio),
+            MessageHandler(filters.Regex(r"(?i)^editar\s+\d+$"), editar_direto_comando),
+        ],
         states={
             EDITAR_PAGINA: [MessageHandler(filters.TEXT & ~filters.COMMAND, editar_navegar)],
             EDITAR_CAMPO: [MessageHandler(filters.TEXT & ~filters.COMMAND, editar_receber_campo)],
@@ -3461,7 +3644,18 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("exportar", exportar_csv))
     app.add_handler(CommandHandler("migrar_casas", cmd_migrar_casas))
+    conv_duplicar_desc = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex(r"(?i)^duplicar\s+\d+\s+descricao$"), duplicar_descricao_inicio)],
+        states={
+            DUPLICAR_DESC_AGUARDA: [MessageHandler(filters.TEXT & ~filters.COMMAND, duplicar_descricao_receber)],
+        },
+        fallbacks=fallbacks_padrao,
+    )
+
+    app.add_handler(MessageHandler(filters.Regex(r"(?i)^duplicar\s+\d+\s+casa\s+.+$"), duplicar_comando))
+    app.add_handler(conv_duplicar_desc)
     app.add_handler(MessageHandler(filters.Regex(r"(?i)^duplicar\s+\d+$"), duplicar_comando))
+    app.add_handler(MessageHandler(filters.Regex(r"(?i)^triplicar\s+\d+$"), triplicar_comando))
     app.add_handler(conv_nova)
     app.add_handler(conv_editar)
     app.add_handler(conv_config)

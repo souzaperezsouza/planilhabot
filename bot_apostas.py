@@ -555,7 +555,7 @@ async def marcar_multiplo_comando(update: Update, ctx: ContextTypes.DEFAULT_TYPE
         linhas.append("⚠️ Não encontradas: " + ", ".join(f"#{i}" for i in nao_achadas))
     await update.message.reply_text("\n".join(linhas), parse_mode="Markdown")
 
-
+def inserir(a):
     unidade = get_unidade_atual()
     with conectar() as conn:
         with conn.cursor() as cur:
@@ -747,14 +747,6 @@ MAPA_ESPORTE = {
     "cricket":              "🏏 Cricket",
     "🏏 cricket":           "🏏 Cricket",
 }
-
-def normalizar_esporte(s):
-    if not s: return ""
-    s = s.strip()
-    sl = s.lower()
-    if "ltipla" in sl and ("esporte" in sl or "sport" in sl or sl in ("multipla","múltipla")):
-        return "🎯 Múltipla"
-    return MAPA_ESPORTE.get(sl, s)
 
 def normalizar_esporte(s):
     if not s: return ""

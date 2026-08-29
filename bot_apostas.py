@@ -229,6 +229,7 @@ GERAR_MENU                                          = 16
 CONFIG_MENU, GASTOS_MENU, GASTO_DESCRICAO, GASTO_VALOR = range(17, 21)
 LIMITACOES_MENU, LIMITACOES_ADD                         = range(21, 23)
 DUPLICAR_DESC_AGUARDA                                    = 23
+SEMANA_MES, SEMANA_SEMANA                                = 24, 25
 
 CANCELAR_BTN = "❌ Cancelar"
 VOLTAR_BTN   = "⬅️ Voltar"
@@ -252,7 +253,8 @@ def teclado_cancelar_voltar():
 def teclado_resultados():
     return ReplyKeyboardMarkup([
         ["🏦 Por Casa", "🏅 Por Esporte"],
-        ["📅 Por Mês",  "📊 Estatísticas"],
+        ["📅 Por Mês",  "📆 Semana"],
+        ["📊 Estatísticas"],
         ["🔙 Voltar"],
     ], resize_keyboard=True)
 
@@ -516,7 +518,44 @@ async def duplicar_descricao_receber(update: Update, ctx: ContextTypes.DEFAULT_T
         await update.message.reply_text(texto.replace("*", ""))
     return ConversationHandler.END
 
-def inserir(a):
+async def marcar_multiplo_comando(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Handler global: 'green 12 34 56', 'red 12, 34 e 56' etc. — marca várias
+    apostas de uma vez, sem precisar entrar em editar uma por uma."""
+    texto = update.message.text.strip()
+    m = re.match(r"(?i)^(green|red|void)\s+(.+)$", texto)
+    if not m:
+        return
+    palavra   = m.group(1).lower()
+    resultado = {"green": "ganhou", "red": "perdeu", "void": "void"}[palavra]
+    ids = [int(x) for x in re.findall(r"\d+", m.group(2))]
+    if not ids:
+        return
+
+    ok, nao_achadas = [], []
+    lucro_soma = 0.0
+    for id_alvo in ids:
+        aposta = buscar_por_id(id_alvo)
+        if not aposta:
+            nao_achadas.append(id_alvo)
+            continue
+        atualizar_campo(id_alvo, "resultado", resultado)
+        aposta["resultado"] = resultado
+        lucro_soma += lucro_aposta(aposta)
+        ok.append(id_alvo)
+
+    emoji_conf = {"ganhou": "✅", "perdeu": "❌", "void": "↩️"}[resultado]
+    label_res  = {"ganhou": "Green", "perdeu": "Red", "void": "Void"}[resultado]
+    linhas = [f"{emoji_conf} *{len(ok)} apostas marcadas como {label_res}*"]
+    if ok:
+        linhas.append("IDs: " + ", ".join(f"#{i}" for i in ok))
+        if resultado in ("ganhou", "perdeu"):
+            sinal = "+" if lucro_soma >= 0 else ""
+            linhas.append(f"💰 Impacto combinado: *{sinal}R$ {lucro_soma:.2f}*")
+    if nao_achadas:
+        linhas.append("⚠️ Não encontradas: " + ", ".join(f"#{i}" for i in nao_achadas))
+    await update.message.reply_text("\n".join(linhas), parse_mode="Markdown")
+
+
     unidade = get_unidade_atual()
     with conectar() as conn:
         with conn.cursor() as cur:
@@ -1534,6 +1573,105 @@ async def resultados_por_mes_especifico(update: Update, ctx: ContextTypes.DEFAUL
         reply_markup=teclado_resultados()
     )
 
+# ── SEMANA (Resultados > Semana > escolhe mês > escolhe semana) ──────────────
+NOMES_MES_ABREV = ["","Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"]
+
+async def resultados_semana_inicio(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    apostas = carregar()
+    res     = [a for a in apostas if a["resultado"] in ("ganhou","perdeu") or eh_cashout(a)]
+    if not res:
+        await update.message.reply_text("Nenhuma aposta resolvida ainda.", reply_markup=teclado_resultados())
+        return RESULTADOS_MENU
+
+    chaves = sorted({str(a["data"])[:7] for a in res}, reverse=True)  # "YYYY-MM", mais recente primeiro
+    ctx.user_data["semana_meses"] = {}
+    linhas_botoes = []
+    for chave in chaves:
+        ano, mes = int(chave[:4]), int(chave[5:])
+        label = f"{NOMES_MES_ABREV[mes]}/{ano}"
+        ctx.user_data["semana_meses"][label] = (ano, mes)
+        linhas_botoes.append(label)
+
+    teclado = [linhas_botoes[i:i+2] for i in range(0, len(linhas_botoes), 2)] + [["🔙 Voltar"]]
+    await update.message.reply_text(
+        "📆 *Semana* — escolha o mês:",
+        reply_markup=ReplyKeyboardMarkup(teclado, resize_keyboard=True),
+        parse_mode="Markdown"
+    )
+    return SEMANA_MES
+
+async def resultados_semana_mes_escolhido(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    txt = update.message.text.strip()
+    if txt == "🔙 Voltar":
+        await update.message.reply_text("Voltando…", reply_markup=teclado_resultados())
+        return RESULTADOS_MENU
+
+    mes_info = ctx.user_data.get("semana_meses", {}).get(txt)
+    if not mes_info:
+        await update.message.reply_text("❓ Escolha um dos meses na lista.")
+        return SEMANA_MES
+    ano, mes = mes_info
+
+    apostas = carregar()
+    res     = [a for a in apostas if a["resultado"] in ("ganhou","perdeu") or eh_cashout(a)]
+    do_mes  = [a for a in res if str(a["data"])[:7] == f"{ano}-{mes:02d}"]
+
+    from collections import defaultdict
+    por_semana = defaultdict(list)
+    for a in do_mes:
+        d = a["data"] if hasattr(a["data"], "strftime") else datetime.strptime(str(a["data"])[:10], "%Y-%m-%d")
+        chave_sem = d.isocalendar()[:2]  # (ano_iso, semana_iso)
+        por_semana[chave_sem].append(a)
+
+    ctx.user_data["semana_mes_atual"] = (ano, mes)
+    ctx.user_data["semana_opcoes"] = {}
+    linhas_botoes = []
+    for chave_sem in sorted(por_semana.keys()):
+        ano_iso, semana_iso = chave_sem
+        seg = datetime.fromisocalendar(ano_iso, semana_iso, 1)
+        dom = datetime.fromisocalendar(ano_iso, semana_iso, 7)
+        label = f"Semana {semana_iso} ({seg.strftime('%d/%m')}–{dom.strftime('%d/%m')})"
+        ctx.user_data["semana_opcoes"][label] = por_semana[chave_sem]
+        linhas_botoes.append([label])
+
+    teclado = linhas_botoes + [["🔙 Voltar"]]
+    await update.message.reply_text(
+        f"📆 *{NOMES_MES_ABREV[mes]}/{ano}* — escolha a semana:",
+        reply_markup=ReplyKeyboardMarkup(teclado, resize_keyboard=True),
+        parse_mode="Markdown"
+    )
+    return SEMANA_SEMANA
+
+async def resultados_semana_escolhida(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    txt = update.message.text.strip()
+    if txt == "🔙 Voltar":
+        return await resultados_semana_inicio(update, ctx)
+
+    ap_semana = ctx.user_data.get("semana_opcoes", {}).get(txt)
+    if ap_semana is None:
+        await update.message.reply_text("❓ Escolha uma das semanas na lista.")
+        return SEMANA_SEMANA
+
+    lucro_s   = sum(lucro_aposta(a) for a in ap_semana)
+    stake_s   = sum(float(a["stake"]) for a in ap_semana)
+    g_s       = sum(1 for a in ap_semana if a["resultado"] == "ganhou")
+    roi_s     = lucro_s / stake_s if stake_s else 0
+    lucro_u_s = sum(lucro_aposta(a) / float(a.get("unidade") or 50) for a in ap_semana)
+    media_s   = lucro_s / len(ap_semana) if ap_semana else 0
+    pico_s, fundo_s = pico_e_fundo(ap_semana)
+    emoji_s   = "🟢" if lucro_s >= 0 else "🔴"
+    sinal_s   = "+" if lucro_s >= 0 else ""
+
+    await update.message.reply_text(
+        f"{emoji_s} *{txt}*\n\n"
+        f"💰 Lucro: *{sinal_s}R$ {lucro_s:.2f}* ({lucro_u_s:+.2f}u)\n"
+        f"📊 ROI: *{roi_s:+.1%}* | Média/aposta: R$ {media_s:.2f}\n"
+        f"🏆 {g_s}V / {len(ap_semana)-g_s}D | {len(ap_semana)} apostas\n"
+        f"🔝 Máxima da semana: *+R$ {pico_s:.2f}*\n🔻 Mínima da semana: *R$ {fundo_s:.2f}*",
+        reply_markup=teclado_resultados(), parse_mode="Markdown"
+    )
+    return RESULTADOS_MENU
+
 async def resultados_por_esporte(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     apostas = carregar()
     res     = [a for a in apostas if a["resultado"] in ("ganhou","perdeu") or eh_cashout(a)]
@@ -1708,6 +1846,8 @@ async def resultados_resposta(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return RESULTADOS_MENU
     if txt == "📊 Estatísticas":
         return await estatisticas(update, ctx)
+    if txt == "📆 Semana":
+        return await resultados_semana_inicio(update, ctx)
     # Filtro por nome de mês: "Janeiro", "jan", "Abril/2026", etc.
     txt_lower = txt.strip().lower()
     # Detecta "mes/ano" ou "mes ano" ou só "mes"
@@ -3674,6 +3814,8 @@ def main():
         entry_points=[MessageHandler(filters.Regex("^📈 Resultados$"), resultados)],
         states={
             RESULTADOS_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, resultados_resposta)],
+            SEMANA_MES:      [MessageHandler(filters.TEXT & ~filters.COMMAND, resultados_semana_mes_escolhido)],
+            SEMANA_SEMANA:   [MessageHandler(filters.TEXT & ~filters.COMMAND, resultados_semana_escolhida)],
         },
         fallbacks=fallbacks_padrao,
     )
@@ -3701,6 +3843,7 @@ def main():
     app.add_handler(conv_duplicar_desc)
     app.add_handler(MessageHandler(filters.Regex(r"(?i)^duplicar\s+\d+$"), duplicar_comando))
     app.add_handler(MessageHandler(filters.Regex(r"(?i)^triplicar\s+\d+$"), triplicar_comando))
+    app.add_handler(MessageHandler(filters.Regex(r"(?i)^(green|red|void)\s+[\d\s,e]+$"), marcar_multiplo_comando))
     app.add_handler(conv_nova)
     app.add_handler(conv_editar)
     app.add_handler(conv_config)

@@ -1393,10 +1393,17 @@ async def estatisticas(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     stake_curso    = sum(float(a["stake"]) for a in pendentes_ap)
     possivel_ganho = sum(float(a["stake"]) * (float(a["odd"]) - 1) for a in pendentes_ap)
     capital_atual  = BANCA_INICIAL + lucro_total - stake_curso - total_gastos()
-    odd_media      = sum(float(a["odd"]) for a in res) / len(res)
+    # Odd média ponderada: quanto eu ficaria pra cada R$1 apostado se tudo
+    # desse green (retorno potencial total / stake total), não a média
+    # simples das odds.
+    stake_total_res = sum(float(a["stake"]) for a in res)
+    retorno_total_res = sum(float(a["stake"]) * float(a["odd"]) for a in res)
+    odd_media      = retorno_total_res / stake_total_res if stake_total_res else 0
 
     melhor_aposta = max(res, key=lambda a: lucro_aposta(a))
     pior_aposta   = min(res, key=lambda a: lucro_aposta(a))
+    ganhos        = [a for a in res if a["resultado"] == "ganhou"]
+    maior_odd_ok  = max(ganhos, key=lambda a: float(a["odd"])) if ganhos else None
 
     def _data_fmt(a):
         return a["data"].strftime("%d/%m/%Y") if hasattr(a["data"], "strftime") else str(a["data"])[:10]
@@ -1422,6 +1429,11 @@ async def estatisticas(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"🟢 Melhor dia: *{melhor_dia}* → +R$ {lucro_melhor_dia:.2f}\n"
         f"🔴 Pior dia: *{pior_dia}* → R$ {lucro_pior_dia:.2f}"
     )
+    if maior_odd_ok:
+        linhas += (
+            f"\n\n🎯 Maior odd acertada: *#{maior_odd_ok['id']}* {_data_fmt(maior_odd_ok)} → "
+            f"odd {float(maior_odd_ok['odd']):g}\n_{maior_odd_ok['descricao']}_"
+        )
     await update.message.reply_text(linhas, reply_markup=teclado_resultados(), parse_mode="Markdown")
     return RESULTADOS_MENU
 
@@ -1774,6 +1786,7 @@ async def editar_inicio(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         linha_hoje = (
             f"\n🔝 Máxima possível hoje (se todas baterem): *+R$ {maxima_hoje:.2f}*"
             f"\n🔻 Mínima possível hoje (se todas perderem): *R$ {minima_hoje:.2f}*"
+            f"\n📂 Em aberto hoje: *{len(pendentes_hoje)} ap*"
         )
 
     if not todas:
@@ -2860,7 +2873,10 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
     maior_stake_val  = max((float(a["stake"]) for a in df_res), default=0)
     stake_total_e    = sum(float(a["stake"]) for a in df_res)
     stake_media_e    = stake_total_e / len(df_res) if df_res else 0
-    odd_media_e      = sum(float(a["odd"]) for a in df_res) / len(df_res) if df_res else 0
+    # Odd média ponderada por stake (retorno potencial total / stake total),
+    # nao a media simples das odds — reflete quanto renderia por real apostado
+    # se tudo desse green.
+    odd_media_e      = (sum(float(a["stake"])*float(a["odd"]) for a in df_res) / stake_total_e) if stake_total_e else 0
     maior_lucro_e    = max((lucro_aposta(a) for a in apostas_ganhas), default=0)
     maior_perda_e    = min((lucro_aposta(a) for a in apostas_perdidas), default=0)
     lucro_medio_e    = lucro_total / len(df_res) if df_res else 0

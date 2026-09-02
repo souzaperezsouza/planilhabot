@@ -25,7 +25,7 @@ def esc_md(texto):
     return re.sub(r"([_*`\[])", r"\\\1", str(texto))
 
 TOKEN         = "8790751046:AAFHpd7q4FmgUZrq3PA4eMb06fMyMaiL5lE"
-DATABASE_URL  = os.environ.get("DATABASE_URL", "postgresql://db_setembro_user:6MjNh6d47Ve7Oiwz0hKDcFNmlofBLZ42@dpg-dac2doqjobas73carjs0-a/db_setembro")
+DATABASE_URL  = os.environ.get("DATABASE_URL", "postgresql://db_setembro_user:6MjNh6d47Ve7Oiwz0hKDcFNmlofBLZ42@dpg-dac2doqjobas73carjs0-a.oregon-postgres.render.com/db_setembro")
 BANCA_INICIAL = 5000
 
 CASAS = [

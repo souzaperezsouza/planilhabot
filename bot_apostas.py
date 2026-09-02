@@ -2391,8 +2391,11 @@ async def gerar_xlsx_dados(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏳ Gerando script de migração, aguarde...")
     try:
         apostas       = carregar()
+        gastos        = listar_gastos()
+        casas_lim     = get_casas_limitadas()
         unidade_atual = get_unidade_atual()
         max_id        = max((a["id"] for a in apostas), default=0)
+        max_id_gasto  = max((g["id"] for g in gastos), default=0)
         total         = len(apostas)
         from datetime import datetime as dt2
 
@@ -2417,6 +2420,19 @@ async def gerar_xlsx_dados(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
 
         dados_str = "\n".join(linhas)
+
+        # Serializa gastos
+        linhas_gastos = []
+        for g in gastos:
+            data_g = g["data"].strftime("%Y-%m-%d") if hasattr(g["data"], "strftime") else str(g["data"])[:10]
+            desc_g = str(g["descricao"]).replace("\n", " ").replace("\r", " ").replace("'", "\\'")
+            valor_g = float(g["valor"])
+            linhas_gastos.append(f"    ({g['id']}, '{data_g}', '{desc_g}', {repr(valor_g)}),")
+        gastos_str = "\n".join(linhas_gastos)
+
+        # Serializa casas limitadas
+        linhas_casas_lim = [f"    '{c}'," for c in casas_lim]
+        casas_lim_str = "\n".join(linhas_casas_lim)
 
         script = f'''"""
 Migração de banco de dados — Bot Apostas
@@ -2443,8 +2459,18 @@ APOSTAS = [
 {dados_str}
 ]
 
+GASTOS = [
+# (id, data, descricao, valor)
+{gastos_str}
+]
+
+CASAS_LIMITADAS = [
+{casas_lim_str}
+]
+
 UNIDADE_ATUAL = "{unidade_atual:.0f}"
 MAX_ID        = {max_id}
+MAX_ID_GASTO  = {max_id_gasto}
 
 if __name__ == "__main__":
     if not NEW_URL:
@@ -2462,6 +2488,11 @@ if __name__ == "__main__":
         cashout_valor NUMERIC(10,2) DEFAULT 0)""")
     cur.execute("""CREATE TABLE IF NOT EXISTS configuracoes (
         chave VARCHAR(50) PRIMARY KEY, valor TEXT NOT NULL)""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS gastos (
+        id SERIAL PRIMARY KEY, data DATE NOT NULL, descricao TEXT NOT NULL,
+        valor NUMERIC(10,2) NOT NULL)""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS casas_limitadas (
+        casa VARCHAR(50) PRIMARY KEY)""")
     conn.commit()
 
     import time as _time
@@ -2501,20 +2532,34 @@ if __name__ == "__main__":
             print(f"\\r[{{barra}}] {{i}}/{{total_ap}} ({{pct:.0%}}) | ~{{estimado:.0f}}s restantes   ", end="", flush=True)
     print()  # newline after progress bar
 
+    print(f"Inserindo {{len(GASTOS)}} gastos...")
+    for g in GASTOS:
+        cur.execute("""INSERT INTO gastos (id,data,descricao,valor) VALUES (%s,%s,%s,%s)
+            ON CONFLICT (id) DO UPDATE SET
+                data=EXCLUDED.data, descricao=EXCLUDED.descricao, valor=EXCLUDED.valor""", g)
+    if GASTOS:
+        cur.execute("SELECT setval(pg_get_serial_sequence('gastos','id'), %s)", (MAX_ID_GASTO,))
+    conn.commit()
+
+    print(f"Inserindo {{len(CASAS_LIMITADAS)}} casa(s) limitada(s)...")
+    for c in CASAS_LIMITADAS:
+        cur.execute("INSERT INTO casas_limitadas (casa) VALUES (%s) ON CONFLICT (casa) DO NOTHING", (c,))
+    conn.commit()
+
     cur.execute("""INSERT INTO configuracoes (chave,valor) VALUES (\'unidade_atual\',%s)
         ON CONFLICT (chave) DO UPDATE SET valor=EXCLUDED.valor""", (UNIDADE_ATUAL,))
     cur.execute("SELECT setval(\'apostas_id_seq\', %s)", (MAX_ID,))
 
     conn.commit(); conn.close()
     cashouts = sum(1 for a in APOSTAS if a[6] == "void" and float(a[11]) > 0)
-    print(f"✅ {{len(APOSTAS)}} apostas migradas | {{cashouts}} cashouts | unidade: R$ {{UNIDADE_ATUAL}}")
+    print(f"✅ {{len(APOSTAS)}} apostas migradas | {{len(GASTOS)}} gastos | {{len(CASAS_LIMITADAS)}} casa(s) limitada(s) | {{cashouts}} cashouts | unidade: R$ {{UNIDADE_ATUAL}}")
     print("Agora faça o Manual Deploy no Render com a nova DATABASE_URL.")
 '''
 
         script_bytes = script.encode("utf-8")
         instrucoes = (
             "📂 *Script de migração gerado!*\n\n"
-            f"_{total} apostas | unidade atual: R$ {unidade_atual:.0f}_\n\n"
+            f"_{total} apostas | {len(gastos)} gastos | {len(casas_lim)} casa(s) limitada(s) | unidade atual: R$ {unidade_atual:.0f}_\n\n"
             "⚠️ *Os dados já estão embutidos no script.*\n"
             "Funciona mesmo se o banco antigo sumir.\n\n"
             "*Como usar:*\n\n"

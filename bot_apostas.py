@@ -1058,7 +1058,10 @@ async def enviar_paginado(update, linhas, reply_markup=None, parse_mode="Markdow
     paginas = paginar_linhas(linhas)
     total = len(paginas)
     for i, pagina in enumerate(paginas):
-        prefixo = f"📄 _Página {i+1}/{total}_\n\n" if total > 1 else ""
+        if total > 1:
+            prefixo = f"📄 _Página {i+1}/{total}_\n\n" if parse_mode else f"📄 Página {i+1}/{total}\n\n"
+        else:
+            prefixo = ""
         await update.message.reply_text(
             prefixo + pagina,
             reply_markup=reply_markup if i == total - 1 else None,
@@ -1959,7 +1962,7 @@ async def editar_inicio(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await enviar_paginado(
         update, linhas,
         reply_markup=ReplyKeyboardMarkup([[CANCELAR_BTN]], resize_keyboard=True),
-        parse_mode="Markdown"
+        parse_mode=None
     )
     return EDITAR_PAGINA
 

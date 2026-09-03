@@ -982,6 +982,18 @@ async def ia_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         partes.append(f"❌ {len(erros)} falharam: " + "; ".join(erros))
     await query.edit_message_text("\n".join(partes))
 
+def stake_real(a):
+    """Retorna o stake efetivamente em risco (dinheiro próprio), excluindo o
+    valor coberto por freebet. Usado para 'stake em curso' e 'capital atual',
+    pra freebet não contar como capital próprio parado numa aposta."""
+    stake = float(a["stake"])
+    try:
+        freebet = float(a.get("freebet") or 0)
+    except Exception:
+        freebet = stake if str(a.get("freebet","")).strip().lower() == "sim" else 0.0
+    freebet = min(freebet, stake)
+    return stake - freebet
+
 def lucro_aposta(a):
     stake   = float(a["stake"])
     odd     = float(a["odd"])
@@ -1361,7 +1373,7 @@ async def resultados(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     sinal       = "+" if lucro_total >= 0 else ""
     emoji       = "📈" if lucro_total >= 0 else "📉"
     pendentes_ap = [a for a in apostas if a["resultado"] == "pendente"]
-    stake_curso  = sum(float(a["stake"]) for a in pendentes_ap)
+    stake_curso  = sum(stake_real(a) for a in pendentes_ap)
     possivel_ganho = sum(float(a["stake"]) * (float(a["odd"]) - 1) for a in pendentes_ap)
     unidade_atual = get_unidade_atual()
     # Lucro em unidades: usa a unidade registrada em cada aposta (histórico fiel)
@@ -1421,7 +1433,7 @@ async def estatisticas(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     lucro_total = sum(lucro_aposta(a) for a in res)
     lucro_medio = lucro_total / len(res) if res else 0
     pendentes_ap   = [a for a in apostas if a["resultado"] == "pendente"]
-    stake_curso    = sum(float(a["stake"]) for a in pendentes_ap)
+    stake_curso    = sum(stake_real(a) for a in pendentes_ap)
     possivel_ganho = sum(float(a["stake"]) * (float(a["odd"]) - 1) for a in pendentes_ap)
     capital_atual  = BANCA_INICIAL + lucro_total - stake_curso - total_gastos()
     # Odd média ponderada: quanto eu ficaria pra cada R$1 apostado se tudo
@@ -1933,7 +1945,7 @@ async def editar_inicio(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return EDITAR_PAGINA
 
-    stake_curso    = sum(float(a["stake"]) for a in todas)
+    stake_curso    = sum(stake_real(a) for a in todas)
     possivel_ganho = sum(float(a["stake"]) * (float(a["odd"]) - 1) for a in todas)
     await update.message.reply_text(
         f"⏳ Stake em curso: *R$ {stake_curso:.2f}* ({len(todas)} ap) | "
@@ -2620,7 +2632,7 @@ def _construir_dashboard_html():
     total       = len(apostas)
     resolvidas  = len(df_res)
     pendentes   = total - resolvidas
-    stake_curso = sum(float(a["stake"]) for a in apostas if a["resultado"] == "pendente")
+    stake_curso = sum(stake_real(a) for a in apostas if a["resultado"] == "pendente")
     lucro_units = sum(lucro_aposta(a) / float(a.get("unidade") or 50) for a in df_res)
 
     # série de evolução da banca (lucro acumulado, só apostas resolvidas)
@@ -2965,7 +2977,7 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
 
     unidade_dash = get_unidade_atual()
     lucro_units_dash = sum(lucro_aposta(a) / float(a.get("unidade") or 50) for a in df_res)
-    stake_curso = sum(float(a["stake"]) for a in apostas if a["resultado"]=="pendente")
+    stake_curso = sum(stake_real(a) for a in apostas if a["resultado"]=="pendente")
     cards = [
         ("Total",         str(total),                    DARK),
         ("Resolvidas",    str(resolvidas),               DARK),

@@ -1891,13 +1891,13 @@ CAMPOS_LABEL     = {
 
 def _montar_linhas_listagem(apostas_todas):
     """Monta as linhas de texto da listagem de apostas para editar."""
-    linhas = [f"✏️ *Editar aposta* ({len(apostas_todas)} pendentes)\n"]
+    linhas = [f"✏️ Editar aposta ({len(apostas_todas)} pendentes)\n"]
     for a in apostas_todas:
         data_fmt = a["data"].strftime("%d/%m") if hasattr(a["data"], "strftime") else str(a["data"])[:10]
         hora     = f" {a.get('horario','')}" if a.get("horario") else ""
         status   = "⏳" if a["resultado"] == "pendente" else ("✅" if a["resultado"] == "ganhou" else ("❌" if a["resultado"] == "perdeu" else "↩️"))
-        linhas.append(f"{status} *#{a['id']}* {data_fmt}{hora} | odd {float(a['odd']):g} | _{esc_md(str(a['descricao'])[:28])}_")
-    linhas.append("\nDigite o *ID* da aposta:")
+        linhas.append(f"{status} #{a['id']} {data_fmt}{hora} | odd {float(a['odd']):g} | {str(a['descricao'])[:28]}")
+    linhas.append("\nDigite o ID da aposta:")
     return linhas
 
 async def editar_inicio(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -1996,17 +1996,22 @@ async def _abrir_edicao_aposta(update: Update, ctx: ContextTypes.DEFAULT_TYPE, i
     hora     = f" {aposta.get('horario','')}" if aposta.get("horario") else ""
     _label_res = {"ganhou": "Green ✅", "perdeu": "Red ❌", "void": "Void ↩️", "pendente": "Pendente ⏳"}
     info = (
-        f"✏️ *Aposta #{id_alvo}*\n\n📅 {data_fmt}{hora}\n🏷 {esc_md(aposta['descricao'])}\n"
-        f"🔢 Odd: {float(aposta['odd']):g}\n💰 Stake: R$ {float(aposta['stake']):.2f}\n"
-        f"🏦 Casa: {esc_md(aposta.get('casa',''))}\n🏅 Esporte: {esc_md(aposta.get('esporte',''))}\n"
+        f"✏️ Aposta #{id_alvo}\n\n"
+        f"📅 {data_fmt}{hora}\n"
+        f"🏷 {aposta['descricao']}\n"
+        f"🔢 Odd: {float(aposta['odd']):g}\n"
+        f"💰 Stake: R$ {float(aposta['stake']):.2f}\n"
+        f"🏦 Casa: {aposta.get('casa','')}\n"
+        f"🏅 Esporte: {aposta.get('esporte','')}\n"
         f"📊 Resultado: {_label_res.get(aposta['resultado'], aposta['resultado'])}\n"
-        f"🎁 Freebet: R$ {float(aposta['freebet'] or 0):.2f}\n\n*Qual campo editar?*"
+        f"🎁 Freebet: R$ {float(aposta['freebet'] or 0):.2f}\n\n"
+        f"Qual campo editar?"
     )
     teclado = [[CAMPOS_LABEL[c]] for c in CAMPOS_EDITAVEIS] + [[CANCELAR_BTN]]
     await update.message.reply_text(
         info,
         reply_markup=ReplyKeyboardMarkup(teclado, resize_keyboard=True, one_time_keyboard=True),
-        parse_mode="Markdown"
+        parse_mode=None
     )
     return EDITAR_CAMPO
 
@@ -2052,9 +2057,9 @@ async def editar_receber_campo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         aposta   = buscar_por_id(id_alvo)
         descr    = str(aposta["descricao"])[:30] if aposta else "?"
         await update.message.reply_text(
-            f"🗑 *Deletar Aposta #{id_alvo}*\n_{descr}_\n\n"
-            f"⚠️ Esta ação é *irreversível*. Digite *SIM* para confirmar:",
-            reply_markup=teclado_cancelar(), parse_mode="Markdown")
+            f"🗑 Deletar Aposta #{id_alvo}\n{descr}\n\n"
+            f"⚠️ Esta ação é irreversível. Digite SIM para confirmar:",
+            reply_markup=teclado_cancelar(), parse_mode=None)
         return EDITAR_VALOR
     if campo == "cashout":
         await update.message.reply_text(
@@ -2169,7 +2174,7 @@ async def aplicar_edicao(update, ctx, id_alvo, campo, novo_valor):
         elif novo_valor == "void": emoji_conf = "↩️"
         elif novo_valor == "pendente": emoji_conf = "⏳"
         exibe = {"ganhou":"Green ✅","perdeu":"Red ❌","void":"Void ↩️","pendente":"Pendente ⏳"}.get(novo_valor, novo_valor)
-    await update.message.reply_text(f"{emoji_conf} *Aposta #{id_alvo} atualizada!*\n{label} → *{exibe}*", parse_mode="Markdown")
+    await update.message.reply_text(f"{emoji_conf} Aposta #{id_alvo} atualizada!\n{label} → {exibe}", parse_mode=None)
     return await voltar_menu(update, ctx)
 
 

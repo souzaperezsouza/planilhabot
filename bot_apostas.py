@@ -1347,11 +1347,11 @@ async def ver_pendentes(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not pendentes:
         await update.message.reply_text("✅ Nenhuma aposta pendente!")
         return
-    linhas = [f"⏳ *{len(pendentes)} apostas pendentes:*\n"]
+    linhas = [f"⏳ *{len(pendentes)} apostas pendentes:*"]
     for a in pendentes:
         data_fmt = a["data"].strftime("%d/%m/%Y") if hasattr(a["data"],"strftime") else str(a["data"])[:10]
         hora = f" {a.get('horario','')}" if a.get("horario") else ""
-        linhas.append(f"*#{a['id']}* {data_fmt}{hora} | odd {float(a['odd']):g} | R${float(a['stake']):.0f} | {esc_md(a.get('casa',''))}\n_{esc_md(a['descricao'])}_\n")
+        linhas.append(f"*#{a['id']}* {data_fmt}{hora} | odd {float(a['odd']):g} | R${float(a['stake']):.0f} | {esc_md(a.get('casa',''))}\n_{esc_md(a['descricao'])}_")
     await enviar_paginado(update, linhas, parse_mode="Markdown")
 NOMES_MES_PT = {
     "janeiro":1,"jan":1,"fevereiro":2,"fev":2,"março":3,"mar":3,"abril":4,"abr":4,

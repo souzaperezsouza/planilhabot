@@ -1332,9 +1332,9 @@ async def receber_casa(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     hora_txt = f" às {ctx.user_data['horario']}" if ctx.user_data.get("horario") else ""
     await update.message.reply_text(
         f"✅ *Aposta #{new_id} salva!*\n\n"
-        f"📅 {data_fmt}{hora_txt}\n🏅 {ctx.user_data.get('esporte','')}\n"
-        f"🏷 {ctx.user_data['descricao']}\n🔢 Odd: {float(ctx.user_data['odd']):g}\n"
-        f"💰 Stake: R$ {float(ctx.user_data['stake']):.2f}\n🏦 Casa: {ctx.user_data['casa']}",
+        f"📅 {data_fmt}{hora_txt}\n🏅 {esc_md(ctx.user_data.get('esporte',''))}\n"
+        f"🏷 {esc_md(ctx.user_data['descricao'])}\n🔢 Odd: {float(ctx.user_data['odd']):g}\n"
+        f"💰 Stake: R$ {float(ctx.user_data['stake']):.2f}\n🏦 Casa: {esc_md(ctx.user_data['casa'])}",
         parse_mode="Markdown"
     )
     return await voltar_menu(update, ctx)
@@ -1351,7 +1351,7 @@ async def ver_pendentes(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     for a in pendentes:
         data_fmt = a["data"].strftime("%d/%m/%Y") if hasattr(a["data"],"strftime") else str(a["data"])[:10]
         hora = f" {a.get('horario','')}" if a.get("horario") else ""
-        linhas.append(f"*#{a['id']}* {data_fmt}{hora} | odd {float(a['odd']):g} | R${float(a['stake']):.0f} | {a.get('casa','')}\n_{a['descricao']}_\n")
+        linhas.append(f"*#{a['id']}* {data_fmt}{hora} | odd {float(a['odd']):g} | R${float(a['stake']):.0f} | {esc_md(a.get('casa',''))}\n_{esc_md(a['descricao'])}_\n")
     await enviar_paginado(update, linhas, parse_mode="Markdown")
 NOMES_MES_PT = {
     "janeiro":1,"jan":1,"fevereiro":2,"fev":2,"março":3,"mar":3,"abril":4,"abr":4,
@@ -1466,16 +1466,16 @@ async def estatisticas(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"⏳ Stake em curso: *R$ {stake_curso:.2f}* ({len(pendentes_ap)} ap) | Possível ganho: *+R$ {possivel_ganho:.2f}*\n"
         f"🔢 Odd média: *{odd_media:.2f}*\n\n"
         f"🔝 Maior ganho: *#{melhor_aposta['id']}* {_data_fmt(melhor_aposta)} → +R$ {lucro_aposta(melhor_aposta):.2f}\n"
-        f"_{melhor_aposta['descricao']}_\n\n"
+        f"_{esc_md(melhor_aposta['descricao'])}_\n\n"
         f"🔻 Maior perda: *#{pior_aposta['id']}* {_data_fmt(pior_aposta)} → R$ {lucro_aposta(pior_aposta):.2f}\n"
-        f"_{pior_aposta['descricao']}_\n\n"
+        f"_{esc_md(pior_aposta['descricao'])}_\n\n"
         f"🟢 Melhor dia: *{melhor_dia}* → +R$ {lucro_melhor_dia:.2f}\n"
         f"🔴 Pior dia: *{pior_dia}* → R$ {lucro_pior_dia:.2f}"
     )
     if maior_odd_ok:
         linhas += (
             f"\n\n🎯 Maior odd acertada: *#{maior_odd_ok['id']}* {_data_fmt(maior_odd_ok)} → "
-            f"odd {float(maior_odd_ok['odd']):g}\n_{maior_odd_ok['descricao']}_"
+            f"odd {float(maior_odd_ok['odd']):g}\n_{esc_md(maior_odd_ok['descricao'])}_"
         )
     await update.message.reply_text(linhas, reply_markup=teclado_resultados(), parse_mode="Markdown")
     return RESULTADOS_MENU
@@ -1776,11 +1776,11 @@ async def resultados_dia(update: Update, ctx: ContextTypes.DEFAULT_TYPE, raw: st
         s   = "+" if l >= 0 else ""
         if eh_cashout(a):
             cv = float(a.get("cashout_valor") or 0)
-            linhas.append(f"💸 *#{a['id']}* odd {float(a['odd']):g} | R${float(a['stake']):.2f} → CO R${cv:.2f} ({s}R$ {l:.2f} / {l_u:+.2f}u)\n_{a['descricao']}_\n")
+            linhas.append(f"💸 *#{a['id']}* odd {float(a['odd']):g} | R${float(a['stake']):.2f} → CO R${cv:.2f} ({s}R$ {l:.2f} / {l_u:+.2f}u)\n_{esc_md(a['descricao'])}_\n")
         elif a["resultado"] == "void":
-            linhas.append(f"↩️ *#{a['id']}* odd {float(a['odd']):g} | R${float(a['stake']):.2f} → Void (R$ 0.00 / 0.00u)\n_{a['descricao']}_\n")
+            linhas.append(f"↩️ *#{a['id']}* odd {float(a['odd']):g} | R${float(a['stake']):.2f} → Void (R$ 0.00 / 0.00u)\n_{esc_md(a['descricao'])}_\n")
         else:
-            linhas.append(f"{emojis_res.get(a['resultado'],'')} *#{a['id']}* odd {float(a['odd']):g} | R${float(a['stake']):.2f} → {s}R$ {l:.2f} ({l_u:+.2f}u)\n_{a['descricao']}_\n")
+            linhas.append(f"{emojis_res.get(a['resultado'],'')} *#{a['id']}* odd {float(a['odd']):g} | R${float(a['stake']):.2f} → {s}R$ {l:.2f} ({l_u:+.2f}u)\n_{esc_md(a['descricao'])}_\n")
     linhas.append("Digite outra data, 🏦 *Por Casa* ou 🔙 *Voltar*:")
     await enviar_paginado(update, linhas, reply_markup=teclado_resultados(), parse_mode="Markdown")
     return True
@@ -1828,7 +1828,7 @@ async def resultados_por_casa_detalhe(update: Update, ctx: ContextTypes.DEFAULT_
         data_fmt = a["data"].strftime("%d/%m/%Y") if hasattr(a["data"],"strftime") else str(a["data"])[:10]
         res_emoji = "💸" if eh_cashout(a) else emojis_res.get(a["resultado"], "")
         linhas.append(
-            f"{res_emoji} *#{a['id']}* {data_fmt} | odd {float(a['odd']):g} | R${float(a['stake']):.2f} \u2192 {s}R$ {l:.2f} ({l_u:+.2f}u)\n_{a['descricao']}_\n"
+            f"{res_emoji} *#{a['id']}* {data_fmt} | odd {float(a['odd']):g} | R${float(a['stake']):.2f} \u2192 {s}R$ {l:.2f} ({l_u:+.2f}u)\n_{esc_md(a['descricao'])}_\n"
         )
 
     linhas.append("Digite outra casa, data ou 🔙 *Voltar*:")
@@ -1895,7 +1895,7 @@ def _montar_linhas_listagem(apostas_todas):
         data_fmt = a["data"].strftime("%d/%m") if hasattr(a["data"], "strftime") else str(a["data"])[:10]
         hora     = f" {a.get('horario','')}" if a.get("horario") else ""
         status   = "⏳" if a["resultado"] == "pendente" else ("✅" if a["resultado"] == "ganhou" else ("❌" if a["resultado"] == "perdeu" else "↩️"))
-        linhas.append(f"{status} *#{a['id']}* {data_fmt}{hora} | odd {float(a['odd']):g} | _{str(a['descricao'])[:28]}_")
+        linhas.append(f"{status} *#{a['id']}* {data_fmt}{hora} | odd {float(a['odd']):g} | _{esc_md(str(a['descricao'])[:28])}_")
     linhas.append("\nDigite o *ID* da aposta:")
     return linhas
 
@@ -1995,9 +1995,9 @@ async def _abrir_edicao_aposta(update: Update, ctx: ContextTypes.DEFAULT_TYPE, i
     hora     = f" {aposta.get('horario','')}" if aposta.get("horario") else ""
     _label_res = {"ganhou": "Green ✅", "perdeu": "Red ❌", "void": "Void ↩️", "pendente": "Pendente ⏳"}
     info = (
-        f"✏️ *Aposta #{id_alvo}*\n\n📅 {data_fmt}{hora}\n🏷 {aposta['descricao']}\n"
+        f"✏️ *Aposta #{id_alvo}*\n\n📅 {data_fmt}{hora}\n🏷 {esc_md(aposta['descricao'])}\n"
         f"🔢 Odd: {float(aposta['odd']):g}\n💰 Stake: R$ {float(aposta['stake']):.2f}\n"
-        f"🏦 Casa: {aposta.get('casa','')}\n🏅 Esporte: {aposta.get('esporte','')}\n"
+        f"🏦 Casa: {esc_md(aposta.get('casa',''))}\n🏅 Esporte: {esc_md(aposta.get('esporte',''))}\n"
         f"📊 Resultado: {_label_res.get(aposta['resultado'], aposta['resultado'])}\n"
         f"🎁 Freebet: R$ {float(aposta['freebet'] or 0):.2f}\n\n*Qual campo editar?*"
     )
@@ -2253,7 +2253,7 @@ async def gastos_resposta(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Nenhum gasto registrado ainda.", reply_markup=teclado_gastos())
         else:
             linhas = [
-                f"#{g['id']} | {g['data'].strftime('%d/%m/%Y')} | {g['descricao']} | R$ {float(g['valor']):.2f}"
+                f"#{g['id']} | {g['data'].strftime('%d/%m/%Y')} | {esc_md(g['descricao'])} | R$ {float(g['valor']):.2f}"
                 for g in gastos
             ]
             await enviar_paginado(update, linhas, reply_markup=teclado_gastos())

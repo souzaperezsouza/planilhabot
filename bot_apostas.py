@@ -1,15 +1,17 @@
 import os
 import io
 import re
+import csv
 import logging
 import threading
+from collections import defaultdict
 import psycopg2
 import psycopg2.extras
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime, timedelta, timezone
 import base64
 import json
-from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, InputFile, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import Update, ReplyKeyboardMarkup, InputFile, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
     ConversationHandler, ContextTypes, filters, CallbackQueryHandler
@@ -220,8 +222,7 @@ logging.basicConfig(level=logging.WARNING)
 
 # Estados dos ConversationHandlers
 DATA, HORARIO, DESCRICAO, ODD, STAKE, ESPORTE, CASA = range(7)
-ATUALIZAR_ID, ATUALIZAR_RES                         = range(7, 9)
-EDITAR_ID, EDITAR_CAMPO, EDITAR_VALOR, EDITAR_CASA  = range(9, 13)
+EDITAR_CAMPO, EDITAR_VALOR, EDITAR_CASA             = range(10, 13)
 EDITAR_PAGINA                                       = 13
 MUDAR_UNIDADE_VALOR                                 = 14
 RESULTADOS_MENU                                     = 15
@@ -405,6 +406,24 @@ def _texto_resumo_aposta(id_orig, aposta, novo_id, titulo):
         f"🏦 Casa: {esc_md(aposta.get('casa') or '')}\n📌 Resultado: {res_txt}"
     )
 
+def _texto_card_aposta(aposta, lucro_txt=None):
+    """Card completo de uma aposta (data, esporte, descrição inteira, odd,
+    stake, casa, resultado e opcionalmente o lucro), usado onde é preciso
+    conferir a aposta certa antes/depois de uma ação em lote."""
+    data_fmt = aposta["data"].strftime("%d/%m/%Y") if hasattr(aposta["data"], "strftime") else str(aposta["data"])[:10]
+    hora_txt = f' às {aposta["horario"]}' if aposta.get("horario") else ""
+    res_txt = {"ganhou": "Green ✅", "perdeu": "Red ❌", "void": "Void ↩️", "pendente": "Pendente ⏳"}.get(aposta["resultado"], aposta["resultado"])
+    texto = (
+        f"*#{aposta['id']}*\n"
+        f"📅 {data_fmt}{hora_txt}\n"
+        f"🏅 {esc_md(aposta.get('esporte') or '')}\n🏷 {esc_md(aposta['descricao'])}\n"
+        f"🔢 Odd: {float(aposta['odd']):g}\n💰 Stake: R$ {float(aposta['stake']):.2f}\n"
+        f"🏦 Casa: {esc_md(aposta.get('casa') or '')}\n📌 Resultado: {res_txt}"
+    )
+    if lucro_txt is not None:
+        texto += f"\n{lucro_txt}"
+    return texto
+
 async def duplicar_comando(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Handler global: qualquer mensagem 'duplicar <id>' cria uma cópia exata
     dessa aposta (mesma data, resultado, odd, stake etc.), independente de
@@ -532,6 +551,7 @@ async def marcar_multiplo_comando(update: Update, ctx: ContextTypes.DEFAULT_TYPE
         return
 
     ok, nao_achadas = [], []
+    cards = []
     lucro_soma = 0.0
     for id_alvo in ids:
         aposta = buscar_por_id(id_alvo)
@@ -540,20 +560,33 @@ async def marcar_multiplo_comando(update: Update, ctx: ContextTypes.DEFAULT_TYPE
             continue
         atualizar_campo(id_alvo, "resultado", resultado)
         aposta["resultado"] = resultado
-        lucro_soma += lucro_aposta(aposta)
+        lucro_ap = lucro_aposta(aposta)
+        lucro_soma += lucro_ap
         ok.append(id_alvo)
+        texto = f"*#{id_alvo}*\n🏷 {esc_md(aposta['descricao'])}"
+        if resultado in ("ganhou", "perdeu"):
+            sinal_ap = "+" if lucro_ap >= 0 else ""
+            texto += f"\n💰 Lucro: {sinal_ap}R$ {lucro_ap:.2f}"
+        cards.append(texto)
 
     emoji_conf = {"ganhou": "✅", "perdeu": "❌", "void": "↩️"}[resultado]
     label_res  = {"ganhou": "Green", "perdeu": "Red", "void": "Void"}[resultado]
-    linhas = [f"{emoji_conf} *{len(ok)} apostas marcadas como {label_res}*"]
-    if ok:
-        linhas.append("IDs: " + ", ".join(f"#{i}" for i in ok))
-        if resultado in ("ganhou", "perdeu"):
-            sinal = "+" if lucro_soma >= 0 else ""
-            linhas.append(f"💰 Impacto combinado: *{sinal}R$ {lucro_soma:.2f}*")
+
+    await update.message.reply_text(f"{emoji_conf} *{len(ok)} apostas marcadas como {label_res}*", parse_mode="Markdown")
+    for card in cards:
+        try:
+            await update.message.reply_text(card, parse_mode="Markdown")
+        except Exception:
+            await update.message.reply_text(card.replace("*", ""))
+
+    rodape = []
+    if ok and resultado in ("ganhou", "perdeu"):
+        sinal = "+" if lucro_soma >= 0 else ""
+        rodape.append(f"💰 Impacto combinado: *{sinal}R$ {lucro_soma:.2f}*")
     if nao_achadas:
-        linhas.append("⚠️ Não encontradas: " + ", ".join(f"#{i}" for i in nao_achadas))
-    await update.message.reply_text("\n".join(linhas), parse_mode="Markdown")
+        rodape.append("⚠️ Não encontradas: " + ", ".join(f"#{i}" for i in nao_achadas))
+    if rodape:
+        await update.message.reply_text("\n".join(rodape), parse_mode="Markdown")
 
 def inserir(a):
     unidade = get_unidade_atual()
@@ -1186,7 +1219,6 @@ def normalizar_horario(raw: str):
     """Converte entrada flexível de horário para HH:MM.
     Aceita: 15 → 15:00 | 15:3 → 15:30 | 153 → 15:30 | 1530 → 15:30 | 15:30 → 15:30
     """
-    import re
     raw = raw.strip().replace(".", ":").replace(",", ":")
     # Formato HH:MM ou H:MM
     m = re.fullmatch(r"(\d{1,2}):(\d{1,2})", raw)
@@ -1269,8 +1301,7 @@ async def receber_stake(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return ODD
     # Parse sugestão tipo "1u = R$80.00" ou "0.75u = R$60.00"
-    import re as _re
-    m_sug = _re.match(r"[\d.]+u\s*=\s*R\$([\d.,]+)", raw)
+    m_sug = re.match(r"[\d.]+u\s*=\s*R\$([\d.,]+)", raw)
     if m_sug:
         raw = m_sug.group(1)
     try:

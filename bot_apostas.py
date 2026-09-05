@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 import base64
 import json
 from telegram import Update, ReplyKeyboardMarkup, InputFile, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.error import BadRequest
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
     ConversationHandler, ContextTypes, filters, CallbackQueryHandler
@@ -1087,7 +1088,10 @@ def paginar_linhas(linhas, limite=LIMITE_TELEGRAM):
 
 async def enviar_paginado(update, linhas, reply_markup=None, parse_mode="Markdown"):
     """Envia uma lista de linhas como uma ou mais mensagens, respeitando o
-    limite de caracteres do Telegram. O teclado só vai na última mensagem."""
+    limite de caracteres do Telegram. O teclado só vai na última mensagem.
+    Se o Telegram rejeitar o Markdown (ex: descrição com caractere especial
+    que escapou da nossa validação), reenvia a mesma página sem formatação
+    em vez de travar o fluxo inteiro."""
     paginas = paginar_linhas(linhas)
     total = len(paginas)
     for i, pagina in enumerate(paginas):
@@ -1095,11 +1099,19 @@ async def enviar_paginado(update, linhas, reply_markup=None, parse_mode="Markdow
             prefixo = f"📄 _Página {i+1}/{total}_\n\n" if parse_mode else f"📄 Página {i+1}/{total}\n\n"
         else:
             prefixo = ""
-        await update.message.reply_text(
-            prefixo + pagina,
-            reply_markup=reply_markup if i == total - 1 else None,
-            parse_mode=parse_mode
-        )
+        markup_pagina = reply_markup if i == total - 1 else None
+        try:
+            await update.message.reply_text(
+                prefixo + pagina,
+                reply_markup=markup_pagina,
+                parse_mode=parse_mode
+            )
+        except BadRequest as e:
+            if "parse entities" in str(e).lower() or "can't parse" in str(e).lower():
+                texto_limpo = re.sub(r"[_*`\[\]]", "", prefixo + pagina)
+                await update.message.reply_text(texto_limpo, reply_markup=markup_pagina)
+            else:
+                raise
 
 async def voltar_menu(update, ctx):
     ctx.user_data.clear()

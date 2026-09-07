@@ -256,7 +256,7 @@ def teclado_resultados():
     return ReplyKeyboardMarkup([
         ["🏦 Por Casa", "🏅 Por Esporte"],
         ["📅 Por Mês",  "📆 Semana"],
-        ["📊 Estatísticas"],
+        ["📅 Desde...", "📊 Estatísticas"],
         ["🔙 Voltar"],
     ], resize_keyboard=True)
 
@@ -1881,11 +1881,58 @@ async def resultados_por_casa_detalhe(update: Update, ctx: ContextTypes.DEFAULT_
     linhas.append("Digite outra casa, data ou 🔙 *Voltar*:")
     await enviar_paginado(update, linhas, reply_markup=teclado_resultados(), parse_mode="Markdown")
 
+async def resultados_desde(update: Update, ctx: ContextTypes.DEFAULT_TYPE, data_ini: datetime):
+    """Mostra o acumulado de resultados desde uma data até hoje (inclusive)."""
+    apostas   = carregar()
+    res       = [a for a in apostas if a["resultado"] in ("ganhou","perdeu") or eh_cashout(a)]
+    data_str  = data_ini.strftime("%Y-%m-%d")
+    do_periodo = [a for a in res if str(a["data"])[:10] >= data_str]
+    if not do_periodo:
+        await update.message.reply_text(
+            f"Nenhuma aposta resolvida desde {data_ini.strftime('%d/%m/%Y')}.",
+            reply_markup=teclado_resultados())
+        return
+    lucro_p   = sum(lucro_aposta(a) for a in do_periodo)
+    stake_p   = sum(float(a["stake"]) for a in do_periodo)
+    lucro_u_p = sum(lucro_aposta(a) / float(a.get("unidade") or 50) for a in do_periodo)
+    g_p       = sum(1 for a in do_periodo if a["resultado"] == "ganhou")
+    p_p       = sum(1 for a in do_periodo if a["resultado"] == "perdeu")
+    co_p      = sum(1 for a in do_periodo if eh_cashout(a))
+    roi_p     = lucro_p / stake_p if stake_p else 0
+    media_p   = lucro_p / len(do_periodo) if do_periodo else 0
+    emoji_p   = "🟢" if lucro_p >= 0 else "🔴"
+    sinal_p   = "+" if lucro_p >= 0 else ""
+    resumo_str = f"{g_p}V {p_p}D"
+    if co_p: resumo_str += f" {co_p}CO"
+    hoje_fmt = datetime.now().strftime("%d/%m/%Y")
+    await update.message.reply_text(
+        f"{emoji_p} *Desde {data_ini.strftime('%d/%m/%Y')}* (até {hoje_fmt})\n\n"
+        f"💰 Lucro: *{sinal_p}R$ {lucro_p:.2f}* ({lucro_u_p:+.2f}u)\n"
+        f"📊 ROI: *{roi_p:+.1%}* | Média/aposta: R$ {media_p:.2f}\n"
+        f"🏆 {resumo_str} | {len(do_periodo)} apostas",
+        reply_markup=teclado_resultados(), parse_mode="Markdown"
+    )
+
 async def resultados_resposta(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Handler das respostas dentro do ConversationHandler de resultados."""
     txt = update.message.text
     if txt == "🔙 Voltar":
+        ctx.user_data.pop("aguardando_desde", False)
         return await voltar_menu(update, ctx)
+    if ctx.user_data.get("aguardando_desde") and txt not in (
+        "🏦 Por Casa", "📅 Por Mês", "🏅 Por Esporte", "📊 Estatísticas", "📆 Semana", "📅 Desde..."
+    ):
+        ctx.user_data.pop("aguardando_desde", False)
+        data_norm = normalizar_data(txt.strip())
+        if not data_norm:
+            ctx.user_data["aguardando_desde"] = True
+            await update.message.reply_text(
+                "❓ Data inválida. Digite no formato DD/MM ou DD/MM/AAAA (ex: 01/08/2026), ou 🔙 Voltar para cancelar:",
+                reply_markup=teclado_resultados())
+            return RESULTADOS_MENU
+        await resultados_desde(update, ctx, datetime.strptime(data_norm, "%Y-%m-%d"))
+        return RESULTADOS_MENU
+    ctx.user_data.pop("aguardando_desde", False)
     if txt == "🏦 Por Casa":
         await resultados_por_casa(update, ctx)
         return RESULTADOS_MENU
@@ -1899,6 +1946,12 @@ async def resultados_resposta(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return await estatisticas(update, ctx)
     if txt == "📆 Semana":
         return await resultados_semana_inicio(update, ctx)
+    if txt == "📅 Desde...":
+        ctx.user_data["aguardando_desde"] = True
+        await update.message.reply_text(
+            "📅 Digite a data inicial (DD/MM ou DD/MM/AAAA):",
+            reply_markup=teclado_resultados())
+        return RESULTADOS_MENU
     # Filtro por nome de mês: "Janeiro", "jan", "Abril/2026", etc.
     txt_lower = txt.strip().lower()
     # Detecta "mes/ano" ou "mes ano" ou só "mes"
@@ -3476,6 +3529,87 @@ async def _gerar_dashboard_interno(update: Update, ctx: ContextTypes.DEFAULT_TYP
     bar2.add_data(d_l, titles_from_data=True); bar2.set_categories(cats)
     bar2.series[0].graphicalProperties.solidFill="2563EB"
     wst.add_chart(bar2, f"R{tbl_hdr_row}")
+
+    # ── Gráficos por faixa de valor de aposta (stake) ──
+    stake_max_fs = max((float(a["stake"]) for a in df_res), default=100)
+    if stake_max_fs <= 100:      passo_stake = 25
+    elif stake_max_fs <= 300:    passo_stake = 50
+    elif stake_max_fs <= 1000:   passo_stake = 100
+    elif stake_max_fs <= 3000:   passo_stake = 250
+    else:                        passo_stake = 500
+
+    FAIXAS_STAKE = []
+    lo_s = 0
+    while lo_s < stake_max_fs + passo_stake:
+        FAIXAS_STAKE.append((lo_s, lo_s + passo_stake))
+        lo_s += passo_stake
+
+    def lbl_fs(lo, hi): return f"R${lo:.0f}-{hi:.0f}"
+
+    dados_faixa_stake = []
+    for idx_fs, (lo, hi) in enumerate(FAIXAS_STAKE):
+        ultimo_fs = idx_fs == len(FAIXAS_STAKE) - 1
+        if ultimo_fs:
+            ap_fs = [a for a in df_res if lo <= float(a["stake"]) <= hi]
+        else:
+            ap_fs = [a for a in df_res if lo <= float(a["stake"]) < hi]
+        if not ap_fs: continue
+        g_fs  = sum(1 for a in ap_fs if a["resultado"] == "ganhou")
+        p_fs  = sum(1 for a in ap_fs if a["resultado"] == "perdeu")
+        lucro_fs = round(sum(lucro_aposta(a) for a in ap_fs), 2)
+        dados_faixa_stake.append((lbl_fs(lo, hi), len(ap_fs), g_fs, p_fs, lucro_fs))
+
+    # Linha dinâmica: começa após a tabela de faixa de odds + gráficos (gap grande
+    # pra não sobrepor os dois gráficos de 14cm de altura ancorados em F/R)
+    data_row_fs = data_row + n + 32
+
+    wst.merge_cells(f"A{data_row_fs}:E{data_row_fs}")
+    cell_fs_title = wst[f"A{data_row_fs}"]
+    cell_fs_title.value = "POR FAIXA DE APOSTA (STAKE)"
+    est(cell_fs_title, bold=True, bg=DARK, size=11)
+    wst.row_dimensions[data_row_fs].height = 22
+    data_row_fs += 1
+
+    headers_fs = ["Faixa de Stake", "Qtd", "Ganhou", "Perdeu", "Lucro R$"]
+    for c, h in enumerate(headers_fs, hdr_col):
+        cell = wst.cell(row=data_row_fs, column=c, value=h)
+        est(cell, bold=True, bg="1E3A5F", size=9); cell.border = brd()
+        wst.row_dimensions[data_row_fs].height = 18
+    tbl_hdr_row_fs = data_row_fs
+    data_row_fs += 1
+
+    for i, (faixa, qtd, g, p, lf) in enumerate(dados_faixa_stake):
+        er = data_row_fs + i; rb = WHITE if i % 2 == 0 else ALT
+        for c, val in enumerate([faixa, qtd, g, p, lf], hdr_col):
+            cell = wst.cell(row=er, column=c, value=val)
+            fc = "000000"
+            if c == hdr_col + 4: fc = cor(val)
+            cell.font = Font(name="Arial", size=9, color=fc)
+            cell.alignment = Alignment(horizontal="center" if c > hdr_col else "left", vertical="center")
+            cell.fill = PatternFill("solid", start_color=rb); cell.border = brd()
+            if c == hdr_col + 4: cell.number_format = "#,##0.00"
+        wst.row_dimensions[er].height = 15
+
+    n_fs = len(dados_faixa_stake)
+    cats_fs = Reference(wst, min_col=hdr_col,   min_row=tbl_hdr_row_fs+1, max_row=tbl_hdr_row_fs+n_fs)
+    d_qtd_fs = Reference(wst, min_col=hdr_col+1, min_row=tbl_hdr_row_fs,   max_row=tbl_hdr_row_fs+n_fs)
+    d_l_fs   = Reference(wst, min_col=hdr_col+4, min_row=tbl_hdr_row_fs,   max_row=tbl_hdr_row_fs+n_fs)
+
+    # Gráfico 1 — quantidade de apostas por faixa de stake
+    bar1_fs = BarChart(); bar1_fs.type="col"; bar1_fs.grouping="clustered"; bar1_fs.overlap=0
+    bar1_fs.title="Apostas por Faixa de Stake"; bar1_fs.style=10
+    bar1_fs.y_axis.title="Apostas"; bar1_fs.width=24; bar1_fs.height=14
+    bar1_fs.add_data(d_qtd_fs, titles_from_data=True); bar1_fs.set_categories(cats_fs)
+    bar1_fs.series[0].graphicalProperties.solidFill="2563EB"
+    wst.add_chart(bar1_fs, f"F{tbl_hdr_row_fs}")
+
+    # Gráfico 2 — lucro por faixa de stake
+    bar2_fs = BarChart(); bar2_fs.type="col"; bar2_fs.grouping="clustered"
+    bar2_fs.title="Lucro R$ por Faixa de Stake"; bar2_fs.style=10
+    bar2_fs.y_axis.title="Lucro R$"; bar2_fs.width=24; bar2_fs.height=14
+    bar2_fs.add_data(d_l_fs, titles_from_data=True); bar2_fs.set_categories(cats_fs)
+    bar2_fs.series[0].graphicalProperties.solidFill="7C3AED"
+    wst.add_chart(bar2_fs, f"R{tbl_hdr_row_fs}")
 
     # ── ABA 3: LUCRO POR DIA ──
     from collections import defaultdict

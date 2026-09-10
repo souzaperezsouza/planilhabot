@@ -1881,6 +1881,55 @@ async def resultados_por_casa_detalhe(update: Update, ctx: ContextTypes.DEFAULT_
     linhas.append("Digite outra casa, data ou 🔙 *Voltar*:")
     await enviar_paginado(update, linhas, reply_markup=teclado_resultados(), parse_mode="Markdown")
 
+async def resultados_por_esporte_detalhe(update: Update, ctx: ContextTypes.DEFAULT_TYPE, nome_esporte: str):
+    """Mostra todas as apostas de um esporte específico."""
+    apostas = carregar()
+    res = [a for a in apostas if a["resultado"] in ("ganhou","perdeu") or eh_cashout(a)]
+
+    # Match flexível: normaliza e compara case-insensitive, ou substring
+    nome_lower = nome_esporte.strip().lower()
+    do_esporte = [a for a in res if
+                  nome_lower in (a.get("esporte") or "").lower() or
+                  nome_lower in normalizar_esporte(a.get("esporte") or "").lower()]
+
+    if not do_esporte:
+        await update.message.reply_text(
+            f"Nenhuma aposta resolvida encontrada para *{nome_esporte}*.",
+            reply_markup=teclado_resultados(), parse_mode="Markdown"
+        )
+        return
+
+    lucro_e   = sum(lucro_aposta(a) for a in do_esporte)
+    stake_e   = sum(float(a["stake"]) for a in do_esporte)
+    g_e       = sum(1 for a in do_esporte if a["resultado"] == "ganhou")
+    roi_e     = lucro_e / stake_e if stake_e else 0
+    lucro_u_e = sum(lucro_aposta(a) / float(a.get("unidade") or 50) for a in do_esporte)
+    emoji_e   = "🟢" if lucro_e >= 0 else "🔴"
+    sinal_e   = "+" if lucro_e >= 0 else ""
+
+    nome_exib = normalizar_esporte(do_esporte[0].get("esporte") or nome_esporte)
+    pico_e, fundo_e = pico_e_fundo(do_esporte)
+    linhas = [
+        f"🏅 *{nome_exib}* — {len(do_esporte)} apostas",
+        f"{emoji_e} Lucro: *{sinal_e}R$ {lucro_e:.2f}* ({lucro_u_e:+.2f}u) | ROI: {roi_e:+.1%} | {g_e}V/{len(do_esporte)-g_e}D",
+        f"🔝 Máximo histórico: *+R$ {pico_e:.2f}*\n🔻 Mínimo histórico: *R$ {fundo_e:.2f}*\n"
+    ]
+
+    emojis_res = {"ganhou":"✅","perdeu":"❌","void":"↩️","pendente":"⏳"}
+    for a in sorted(do_esporte, key=lambda x: (str(x["data"]), x.get("horario") or "")):
+        l   = lucro_aposta(a)
+        u_a = float(a.get("unidade") or 50)
+        l_u = l / u_a
+        s   = "+" if l >= 0 else ""
+        data_fmt = a["data"].strftime("%d/%m/%Y") if hasattr(a["data"],"strftime") else str(a["data"])[:10]
+        res_emoji = "💸" if eh_cashout(a) else emojis_res.get(a["resultado"], "")
+        linhas.append(
+            f"{res_emoji} *#{a['id']}* {data_fmt} | odd {float(a['odd']):g} | R${float(a['stake']):.2f} \u2192 {s}R$ {l:.2f} ({l_u:+.2f}u)\n_{esc_md(a['descricao'])}_\n"
+        )
+
+    linhas.append("Digite outro esporte, data ou 🔙 *Voltar*:")
+    await enviar_paginado(update, linhas, reply_markup=teclado_resultados(), parse_mode="Markdown")
+
 async def resultados_desde(update: Update, ctx: ContextTypes.DEFAULT_TYPE, data_ini: datetime):
     """Mostra o acumulado de resultados desde uma data até hoje (inclusive)."""
     apostas   = carregar()
@@ -1976,8 +2025,13 @@ async def resultados_resposta(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if txt_lower in casas_banco or any(txt_lower in c for c in casas_banco):
         await resultados_por_casa_detalhe(update, ctx, txt)
         return RESULTADOS_MENU
+    # Tenta match de esporte
+    esportes_banco = set(normalizar_esporte(a.get("esporte") or "").lower() for a in apostas_todas)
+    if txt_lower in esportes_banco or any(txt_lower in e for e in esportes_banco):
+        await resultados_por_esporte_detalhe(update, ctx, txt)
+        return RESULTADOS_MENU
     await update.message.reply_text(
-        "❓ Não reconheci. Use os botões, digite uma data (20/05), ano (2026), mês (Janeiro) ou nome de uma casa (Betano, Bet365…).",
+        "❓ Não reconheci. Use os botões, digite uma data (20/05), ano (2026), mês (Janeiro), nome de uma casa (Betano, Bet365…) ou de um esporte (Futebol, Basquete…).",
         reply_markup=teclado_resultados()
     )
     return RESULTADOS_MENU

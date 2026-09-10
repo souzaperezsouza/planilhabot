@@ -184,6 +184,16 @@ MAPA_CASAS_GEMEAS = {
     "Gol de Bet":      "Goldebet",
     "gol de bet":      "Goldebet",
     "goldebet":        "Goldebet",
+
+    # SportingBet (variacao de capitalizacao - NAO mexe em "Sportingbet/Betboo", que é casa própria distinta)
+    "sportingbet":     "SportingBet",
+    "Sportingbet":     "SportingBet",
+    "SPORTINGBET":     "SportingBet",
+
+    # Bullsbet (grafia abreviada "Bulls")
+    "Bulls":           "Bullsbet",
+    "bulls":           "Bullsbet",
+    "BULLS":           "Bullsbet",
 }
 
 ESPORTES = ["⚽ Futebol","🏀 Basquete","🎾 Tênis","🏒 Hóquei",

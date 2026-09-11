@@ -119,22 +119,6 @@ MAPA_CASAS_GEMEAS = {
     "pitaco":         "Rei Do Pitaco",
     "Pitaco":         "Rei Do Pitaco",
     "Rei do Pitaco":  "Rei Do Pitaco",
-    # Donaldbet/Bet.bet
-    "donaldbet":                                      "Donaldbet/Bet.bet",
-    "Donaldbet":                                      "Donaldbet/Bet.bet",
-    "DonaldBet":                                      "Donaldbet/Bet.bet",
-    "bet.bet":                                        "Donaldbet/Bet.bet",
-    "Bet.bet":                                        "Donaldbet/Bet.bet",
-    "BET.BET":                                        "Donaldbet/Bet.bet",
-    "Betpontobet":                                    "Donaldbet/Bet.bet",
-    "Betponto":                                       "Donaldbet/Bet.bet",
-    "Donald":                                         "Donaldbet/Bet.bet",
-    # variacao com maiuscula no Bet.Bet (como aparece no banco)
-    "Donaldbet/Bet.Bet":                              "Donaldbet/Bet.bet",
-    # link markdown que o Telegram salva como texto
-    "Donaldbet/[Bet.bet](https://bet.bet/)":          "Donaldbet/Bet.bet",
-    "Donaldbet/[Bet.Bet](https://bet.bet/)":          "Donaldbet/Bet.bet",
-
     # Bateubet (typos e variacoes com espaco)
     "Bateu Bet":       "Bateubet",
     "Bateu":           "Bateubet",

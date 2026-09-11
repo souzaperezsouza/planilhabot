@@ -35,7 +35,7 @@ CASAS = [
     "Bet365","Betano","SportingBet","Betboo","Vaidebet","Betpix365","Lottu",
     "BETesporte","BetFair","Novibet","Esportivabet","Betnacional",
     "Vupi","Goldebet","Lotogreen","Pagol","Versus","Kto",
-    "4Win","Donaldbet/Bet.bet","Vivasorte","Esportes Da Sorte","Stake",
+    "4Win","Donaldbet","Bet.bet", "Vivasorte","Esportes Da Sorte","Stake",
     "Faz1Bet","EstrelaBet","Outra"
 ]
 

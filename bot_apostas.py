@@ -35,7 +35,7 @@ CASAS = [
     "Bet365","Betano","SportingBet","Betboo","Vaidebet","Betpix365","Lottu",
     "BETesporte","BetFair","Novibet","Esportivabet","Betnacional",
     "Vupi","Goldebet","Lotogreen","Pagol","Versus","Kto",
-    "4Win","Donaldbet","Bet.Bet", "Vivasorte","Esportes Da Sorte","Stake",
+    "4Win","Donaldbet", "Bet.bet","Vivasorte","Esportes Da Sorte","Stake",
     "Faz1Bet","EstrelaBet","Outra"
 ]
 
@@ -1831,9 +1831,13 @@ async def resultados_por_casa_detalhe(update: Update, ctx: ContextTypes.DEFAULT_
     apostas = carregar()
     res = [a for a in apostas if a["resultado"] in ("ganhou","perdeu") or eh_cashout(a)]
 
-    # Match flexível: normaliza e compara case-insensitive, ou substring
+    # Match: primeiro tenta nome exato (normalizado), só cai pro substring
+    # se não achar nada exato — evita "betboo" pegar "betboom" junto.
     nome_lower = nome_casa.strip().lower()
-    do_casa = [a for a in res if
+    do_casa_exato = [a for a in res if
+                      nome_lower == (a.get("casa") or "").lower() or
+                      nome_lower == normalizar_casa(a.get("casa") or "").lower()]
+    do_casa = do_casa_exato if do_casa_exato else [a for a in res if
                nome_lower in (a.get("casa") or "").lower() or
                nome_lower in normalizar_casa(a.get("casa") or "").lower()]
 
@@ -1880,9 +1884,13 @@ async def resultados_por_esporte_detalhe(update: Update, ctx: ContextTypes.DEFAU
     apostas = carregar()
     res = [a for a in apostas if a["resultado"] in ("ganhou","perdeu") or eh_cashout(a)]
 
-    # Match flexível: normaliza e compara case-insensitive, ou substring
+    # Match: primeiro tenta nome exato (normalizado), só cai pro substring
+    # se não achar nada exato.
     nome_lower = nome_esporte.strip().lower()
-    do_esporte = [a for a in res if
+    do_esporte_exato = [a for a in res if
+                          nome_lower == (a.get("esporte") or "").lower() or
+                          nome_lower == normalizar_esporte(a.get("esporte") or "").lower()]
+    do_esporte = do_esporte_exato if do_esporte_exato else [a for a in res if
                   nome_lower in (a.get("esporte") or "").lower() or
                   nome_lower in normalizar_esporte(a.get("esporte") or "").lower()]
 

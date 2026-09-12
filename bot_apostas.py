@@ -583,6 +583,59 @@ async def marcar_multiplo_comando(update: Update, ctx: ContextTypes.DEFAULT_TYPE
     if rodape:
         await update.message.reply_text("\n".join(rodape), parse_mode="Markdown")
 
+async def deletar_multiplo_comando(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Handler global: 'deletar 12 34 56', 'delete 12, 34 e 56' etc. — deleta várias
+    apostas de uma vez, sem precisar entrar em editar uma por uma."""
+    texto = update.message.text.strip()
+    m = re.match(r"(?i)^(deletar|delete)\s+(.+)$", texto)
+    if not m:
+        return
+    ids = [int(x) for x in re.findall(r"\d+", m.group(2))]
+    if not ids:
+        return
+
+    ok, nao_achadas = [], []
+    cards = []
+    lucro_soma = 0.0
+    for id_alvo in ids:
+        aposta = buscar_por_id(id_alvo)
+        if not aposta:
+            nao_achadas.append(id_alvo)
+            continue
+        
+        # Calcula o lucro antes de deletar para mostrar no card
+        lucro_ap = lucro_aposta(aposta)
+        lucro_soma += lucro_ap
+        
+        # Deleta a aposta
+        deletar_aposta(id_alvo)
+        ok.append(id_alvo)
+        
+        # Monta o card da aposta deletada
+        data_fmt = aposta["data"].strftime("%d/%m/%Y") if hasattr(aposta["data"], "strftime") else str(aposta["data"])[:10]
+        res_txt = {"ganhou": "Green ✅", "perdeu": "Red ❌", "void": "Void ↩️", "pendente": "Pendente ⏳"}.get(aposta["resultado"], aposta["resultado"])
+        texto = f"*#{id_alvo}* — {res_txt}\n📅 {data_fmt}\n🏷 {esc_md(aposta['descricao'])}"
+        if aposta["resultado"] in ("ganhou", "perdeu"):
+            sinal_ap = "+" if lucro_ap >= 0 else ""
+            texto += f"\n💰 Lucro: {sinal_ap}R$ {lucro_ap:.2f}"
+        cards.append(texto)
+
+    await update.message.reply_text(f"🗑️ *{len(ok)} apostas deletadas*", parse_mode="Markdown")
+    for card in cards:
+        try:
+            await update.message.reply_text(card, parse_mode="Markdown")
+        except Exception:
+            await update.message.reply_text(card.replace("*", ""))
+
+    rodape = []
+    if ok:
+        sinal = "+" if lucro_soma >= 0 else ""
+        rodape.append(f"💰 Impacto total deletado: *{sinal}R$ {lucro_soma:.2f}*")
+    if nao_achadas:
+        rodape.append("⚠️ Não encontradas: " + ", ".join(f"#{i}" for i in nao_achadas))
+    if rodape:
+        await update.message.reply_text("\n".join(rodape), parse_mode="Markdown")
+
 def inserir(a):
     unidade = get_unidade_atual()
     with conectar() as conn:
@@ -4135,6 +4188,7 @@ def main():
     app.add_handler(MessageHandler(filters.Regex(r"(?i)^duplicar\s+\d+$"), duplicar_comando))
     app.add_handler(MessageHandler(filters.Regex(r"(?i)^triplicar\s+\d+$"), triplicar_comando))
     app.add_handler(MessageHandler(filters.Regex(r"(?i)^(green|red|void)\s+[\d\s,e]+$"), marcar_multiplo_comando))
+    app.add_handler(MessageHandler(filters.Regex(r"(?i)^(deletar|delete)\s+[\d\s,e]+$"), deletar_multiplo_comando))
     app.add_handler(conv_nova)
     app.add_handler(conv_editar)
     app.add_handler(conv_config)

@@ -27,8 +27,9 @@ def esc_md(texto):
         return ""
     return re.sub(r"([_*`\[])", r"\\\1", str(texto))
 
-TOKEN         = "8790751046:AAFHpd7q4FmgUZrq3PA4eMb06fMyMaiL5lE"
-DATABASE_URL  = os.environ.get("DATABASE_URL", "postgresql://db_setembro_user:6MjNh6d47Ve7Oiwz0hKDcFNmlofBLZ42@dpg-dac2doqjobas73carjs0-a.oregon-postgres.render.com/db_setembro")
+# Credenciais vêm das variáveis de ambiente (no Render: Environment). Nunca coloque no código.
+TOKEN         = os.environ.get("TOKEN", "")
+DATABASE_URL  = os.environ.get("DATABASE_URL", "")
 BANCA_INICIAL = 5000
 
 CASAS = [
@@ -2671,14 +2672,14 @@ Como usar:
   1. Troque NEW_URL pela External URL do banco novo
      (Render → banco novo → Connections → External Database URL)
   2. No CMD:
-       cd C:\\\\Users\\\\enzop\\\\Downloads
+       cd <pasta onde você salvou o migrar_db.py>
        python migrar_db.py
   3. Render → seu serviço → Environment → DATABASE_URL
      Coloque a Internal URL do novo banco no Environment → Save Changes → Manual Deploy
 """
 import psycopg2
 
-NEW_URL = "postgresql://db_julho_user:YP9AtSQzw3gwSle8CZZ3x9Rha7GcxpK0@dpg-d94mklu7r5hc73fb972g-a.oregon-postgres.render.com/db_julho"  # <-- troque pela External URL do banco novo quando migrar
+NEW_URL = ""  # <-- cole aqui a External URL do banco novo (não suba este arquivo pro GitHub depois de preencher)
 
 APOSTAS = [
 # (id, data, horario, descricao, odd, stake, resultado, casa, esporte, freebet, unidade, cashout_valor)
@@ -2791,9 +2792,9 @@ if __name__ == "__main__":
             "*Como usar:*\n\n"
             "1️⃣ Salve o `migrar_db.py` na pasta Downloads\n"
             "2️⃣ Atualize `NEW_URL` no arquivo com a *External URL* do banco novo\n"
-            "3️⃣ No `bot_apostas.py`, atualize `DATABASE_URL` com a *External URL* também\n"
+            "3️⃣ Não precisa mexer no `bot_apostas.py`: o banco vem da variável `DATABASE_URL`\n"
             "4️⃣ No CMD:\n"
-            "   `cd C:\\\\Users\\\\enzop\\\\Downloads`\n"
+            "   `cd <pasta onde salvou o arquivo>`\n"
             "   `python migrar_db.py`\n"
             "5️⃣ Render → Environment → `DATABASE_URL` = *Internal URL* → *Manual Deploy*"
         )
@@ -4094,6 +4095,9 @@ def iniciar_servidor():
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 def main():
+    faltando = [n for n, v in (("TOKEN", TOKEN), ("DATABASE_URL", DATABASE_URL)) if not v]
+    if faltando:
+        raise SystemExit(f"❌ Defina as variáveis de ambiente: {', '.join(faltando)}")
     inicializar_db()
     app = (
         Application.builder()
